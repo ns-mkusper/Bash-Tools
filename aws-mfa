@@ -1,0 +1,25 @@
+#!/bin/bash -   
+#title          :awsmfa 
+#description    :Automate MFA Prompt for aws-vault with gauth token
+#author         :Mark Kusper
+#date           :20181009
+#version        :1.0    
+#usage          :./awsmfa
+#notes          :       
+#bash_version   :3.2.57(1)-release
+#============================================================================
+
+mfa_token=$(gauth-aws)
+
+/usr/bin/expect <<EOF
+
+set command_args "$@"
+spawn aws-vault  {*}[lrange \$command_args 0 end] 
+
+expect {
+        "Enter token for arn:aws:iam::\*:mfa/\*:" {
+            send $mfa_token\r
+            exp_continue
+        }
+    }
+EOF

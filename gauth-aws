@@ -1,0 +1,6 @@
+#!/bin/bash
+
+#Get MFA
+result=$(gauth | grep ^AWS | tail -n1 | awk '{print$3}')
+echo $result | pbcopy
+echo $result
