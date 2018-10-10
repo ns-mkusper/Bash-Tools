@@ -1,0 +1,212 @@
+#!/bin/bash
+
+# wrapp script for feh
+
+#window_dimensions=$(xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep -E '(Width|Height):' | sed 's/.*: \(.*\)/\1/' | sed ':a;N;$!ba;s/\n/x/')
+#window_dimensions="2560x1440"
+window_dimensions="2350x1674"
+ENDARG=NO
+NORELOAD=false
+while [[ $# > 1 ]];do
+    key="$1"
+
+    case $key in
+        -i|--instances)
+            INSTANCES="$2"
+            NORELOAD=true
+            shift
+            ;;
+        -s|--sort)
+            SORT="$2"
+            shift
+            ;;
+        -t|--scrollstep)
+            SCROLLSTEP=$2
+            shift
+            ;;
+        -n|--noreload)
+            NORELOAD=true
+            shift
+            ;;
+        -r|--reverse)
+            REVERSE=YES
+            shift 
+            ;;
+        -v|--verbose)
+            VERBOSE=YES
+            shift 
+            ;;
+        *)
+            echo "$1 $2"
+            ;;
+    esac
+    if [ -d "$1" ];then
+        DIR="$1"
+        echo "$DIR"
+    elif [ -f $1 ];then         echo "$DIR" FILE="$1";DIR="$(readlink -f "$FILE" | sed 's/\/[^\/]\{1,\}$//')"
+    fi
+    
+    shift
+done
+
+if [ -z "$DIR" ];then
+    DIR="$1"
+    DIR="$(readlink -f "$DIR")"
+fi
+
+
+
+if [ -z $SORT ]; then SORT=filename;fi
+if [ -z $INSTANCES ]; then INSTANCES=1;fi
+if [ -z $REVERSE ]; then REVERSE=NO;fi
+if [ -z $SCROLLSTEP ]; then
+    SCROLLSTEP=600
+    if [[ "$DIR" == *"/jav"* ]];then
+SCROLLSTEP=300
+    fi
+fi
+if [ -z $VERBOSE ]; then VERBOSE=NO;fi
+# if [ $INSTANCES -gt 7 ];then
+#     RELOAD_TIME_SECONDS=0
+# else
+# RELOAD_TIME_SECONDS=
+#     fi
+
+declare -a FEH_ARGS=( --sort=$SORT --no-jump-on-resort --force-aliasing  --fontpath=/usr/share/fonts/dejavu --font="DejaVuSans/13" --draw-tinted --scroll-step=$SCROLLSTEP --geometry=${window_dimensions} --draw-filename --auto-zoom)
+
+if [ $SORT == "name" ];then
+    SORT=filename
+    fi
+
+
+if [ -z $RELOAD_TIME_SECONDS ]; then
+    if [ $SORT == "filename" -o $SORT == "name"  ];then
+        RELOAD_TIME_SECONDS=$(shuf -i 30-75 -n 1)
+        if [ $NORELOAD == "false" ];then 
+            FEH_ARGS=(${FEH_ARGS[@]}   --reload $RELOAD_TIME_SECONDS )
+            fi
+    else
+        RELOAD_TIME_SECONDS=0
+    fi
+fi
+
+if [ $VERBOSE == "YES" ]; then
+    FEH_ARGS=(${FEH_ARGS[@]} --verbose )
+else
+    FEH_ARGS=(${FEH_ARGS[@]} --quiet )
+fi
+
+if [[ "$DIR" == *"/jav"* ]];then
+    FEH_ARGS=(${FEH_ARGS[@]}  --keep-zoom-vp --limit-width 2450 )
+    # else
+    #     FEH_ARGS=(${FEH_ARGS[@]} --auto-zoom )
+fi
+
+if [ $REVERSE == "YES" ];then FEH_ARGS=(${FEH_ARGS[@]} --reverse) ;fi
+
+open_file() {
+    DIR_LOCAL="$1"
+    FILE_LOCAL="$2"
+    echo "feh ${FEH_ARGS[@]} --start-at ${FILE_LOCAL} $DIR_LOCAL &"    
+    feh ${FEH_ARGS[@]} --start-at "${FILE_LOCAL}" "$DIR_LOCAL" &
+}
+
+open_directory() {
+
+
+    
+#    if [ "$(expr substr $(uname -s) 1 6)" == "CYGWIN" ]; then
+
+#        DIR_LOCAL=$(cygpath "$1")
+#    else
+        DIR_LOCAL="$1"    
+#    fi
+
+
+
+    tmp_find_file=tmp_find_${RANDOM}
+
+    if [ $SORT == "mtime" ];then
+        find "$DIR_LOCAL" -mindepth 1 -maxdepth 1 -type f \( -iname \*jpeg -or -iname \*gif -or -iname \*png -or -iname \*jpg \) -printf "%T@ %Tc %p\n" | sort -rn | sed 's/[^\/]\{1,\}\//\//'  > /tmp/$tmp_find_file
+    else
+        
+    find "$DIR_LOCAL" -mindepth 1 -maxdepth 1 -type f \( -iname \*jpeg -or -iname \*gif -or -iname \*png -or -iname \*jpg \) |sort > /tmp/$tmp_find_file
+fi
+
+    wait
+
+    num_of_files=$(cat /tmp/$tmp_find_file | wc -l)
+
+    skip_val=$((num_of_files / $INSTANCES))
+
+    i=0
+    current_val=0
+    declare -a FILES_ARRAY
+    #FILES_ARRAY=(one two three)
+
+    #    if [ $INSTANCES -gt 1 ];then
+    while [ $i -lt $INSTANCES ];do
+        if [ $i -eq 0 ];then
+	    POSITION=1
+
+        else
+	    POSITION=$((skip_val * i))
+            let "POSITION += +$(shuf -i 1-$((skip_val / 2)) -n 1)"
+        fi
+
+        if [ $POSITION -gt $num_of_files ];then
+	    let POSITION--
+        elif [ $POSITION -lt 1 ];then
+	    let POSITION++    
+        fi
+
+
+        file_at_pos="$(sed -n ${POSITION}p /tmp/$tmp_find_file)"
+        #        file_base="$(echo "$file_at_pos" | sed 's/.*\/\([^\/]\{1,\}[^0-9]\)[0-9\.]\{1,\}\.jpg/\1/')"
+        file_base="$(echo "$file_at_pos" | sed 's/.*\///' | sed 's/[^0-9][0-9\.]\{1,\}\.jpg//')"
+        #echo "$file_base"
+        file_start_num="$(grep -n "$file_base" /tmp/$tmp_find_file | sed 's/^[^:]\{1,\}:\([0-9]\{1,\}\):.*/\1/' | sed 's/^\([0-9]\{1,\}\):.*/\1/' | head -n 1)"
+        #echo $file_start_num
+        #if [ $((file_start_num)) -lt $((skip_val * i)) ];then
+	file_to_touch="$(sed -n ${file_start_num}p /tmp/$tmp_find_file)"
+        #else
+	#   file_to_touch="$(sed -n ${POSITION}p /tmp/$tmp_find_file)"
+        #fi
+        FILES_ARRAY[${i}]="$file_to_touch"
+        #    echo "$((i + 1)) (${POSITION}) : $file_to_touch"
+        #    unset ${FILES_ARRAY[$i]}
+
+        echo "$i $POSITION ${FILES_ARRAY[$i]}"
+
+        echo "feh ${FEH_ARGS[@]} --start-at ${FILES_ARRAY[$i]} $DIR_LOCAL &"
+        feh ${FEH_ARGS[@]} --start-at "${FILES_ARRAY[$i]}" "$DIR_LOCAL" &
+#        echo "feh ${FEH_ARGS[@]} --start-at ${FILES_ARRAY[$i]}        --filelist=/tmp/${tmp_find_file}"
+#       feh ${FEH_ARGS[@]} --start-at "${FILES_ARRAY[$i]}"        --filelist=/tmp/${tmp_find_file} &
+        let i++
+        current_val=$((current_val + skip_val))
+
+    done
+}
+
+
+if [[ -n ${DIR} ]]; then
+
+    #     echo "FILE: ${DIR}"    
+    if [ -f "${DIR}" ]; then # a file is given
+        FILE="$DIR"
+        DIR="$(echo $DIR | sed 's/\/[^\/]\{1,\}$//')"
+        open_file "${DIR}" "${FILE}"
+
+    elif [ -d "${DIR}" ]; then # a directory is given
+        open_directory "${DIR}"
+    else # file doesn't exist
+        echo "error: file doesn't exist: ${DIR}"
+        exit 1
+    fi
+    echo "feh ${FEH_ARGS} $1"
+else
+    echo "No file specified!"
+
+fi
+
+

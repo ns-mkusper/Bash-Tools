@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# ocr/convert pdf to text file
+
+INPUT_PDF=${1}
+
+OUTPUT_TXT=${INPUT_PDF/.pdf/.txt}
+
+NUM_OF_PAGES=$( pdfinfo "${INPUT_PDF}" | grep 'Pages' - | awk '{print $2}' )
+
+TMP_DIR=$(mktemp -d)
+
+for p in `seq 1 $NUM_OF_PAGES`; do
+
+    TMP_PAGE=${TMP_DIR}/$(printf %05d $p)
+    TMP_TIFF=${TMP_PAGE}.tiff
+    # tesseract requires pretty specific tif format input
+    convert -monochrome -density 600 "${INPUT_PDF}"\[$(($p - 1 ))\] ${TMP_TIFF}
+
+    tesseract ${TMP_TIFF} ${TMP_PAGE} txt >/dev/null 2>&1
+    rm ${TMP_TIFF}
+done
+
+cat ${TMP_DIR}/[0-9][0-9][0-9][0-9][0-9].txt > "${OUTPUT_TXT}"
+
