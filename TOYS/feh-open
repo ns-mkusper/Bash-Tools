@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# wrapp script for feh
+# wrapper script for feh
 
 #window_dimensions=$(xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep -E '(Width|Height):' | sed 's/.*: \(.*\)/\1/' | sed ':a;N;$!ba;s/\n/x/')
 #window_dimensions="2560x1440"
