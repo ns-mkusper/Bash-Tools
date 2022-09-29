@@ -129,7 +129,7 @@ function is_direct_play_ready () {
         return 1
     fi
     # check h264 profile (Main works across all chromecast devices) and level (oldest chromecast needs <=41, while newer need >=51)
-    if [ "$original_level" -gt 51 -o "$original_profile" != "Main"]
+    if [ "$original_level" -gt 51 -o "$original_profile" != "Main" ]
     then
         return 1
     fi
