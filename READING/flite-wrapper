@@ -1,0 +1,8 @@
+#!/bin/bash -
+
+# audio device support on mac os isn't available with flite so we need
+# to output to wav and open it to get somewhat expected behavior
+
+TEXT=/dev/stdin
+echo $TEXT
+flite "$TEXT" out.wav && sox out.wav out-fast-read.wav tempo 1.5 && mpv --no-audio-display out-fast-read.wav

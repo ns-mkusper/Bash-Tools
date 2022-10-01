@@ -124,12 +124,8 @@ function is_direct_play_ready () {
     local original_level=$(get_h264_level "$video_file")
     local original_profile=$(get_h264_profile "$video_file")
     # check if the video file is direct-play-ready
-    if [ "$original_video_codec" != 'h264' -o "$original_audio_codec" != 'aac' ]
-    then
-        return 1
-    fi
     # check h264 profile (Main works across all chromecast devices) and level (oldest chromecast needs <=41, while newer need >=51)
-    if [ "$original_level" -gt 51 -o "$original_profile" != "Main" ]
+    if [ "$original_video_codec" != 'h264' -o "$original_audio_codec" != 'aac' -o "$original_level" -gt 51 -o "$original_profile" != "Main" ]
     then
         return 1
     fi
