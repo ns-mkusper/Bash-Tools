@@ -103,7 +103,7 @@ function build_crop_detect_args() {
     done
 
     # take the average of all cropdetect results
-    crop_detect_dimensions=$(for line in "${crop_lines[@]}"
+    local crop_detect_dimensions=$(for line in "${crop_lines[@]}"
     do
         echo $line
     done | awk -F':' '{for (i=1;i<=NF;i++){a[i]+=$i;}} END {for (i=1;i<=NF;i++){printf "%.0f", a[i]/NR; printf ":"};printf "\n"}' | sed 's/:$//')
