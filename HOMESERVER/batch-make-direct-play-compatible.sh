@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# converts video files to direct play them over plex through
-# chromecast devices
+# makes media server library video files play nicely with plex
+# direct-play
 # ref: https://developers.google.com/cast/docs/media
 
 # ARGUMENTS
@@ -55,6 +55,12 @@ FFMPEG_INPUT_OPTIONS=(-map V -map 0:a -map -0:s)
 FFMPEG_VIDEO_OPTIONS=(-c:v h264_nvenc -minrate $DECODER_MIN_RATE -maxrate $DECODER_MAX_RATE -bufsize $DECODER_BUFFER_SIZE -profile:v $H264_OUTPUT_PROFILE -level:v $H264_OUTPUT_LEVEL -movflags +faststart -pix_fmt yuv420p)
 FFMPEG_AUDIO_OPTIONS=(-c:a aac)
 
+function round() {
+    # round decimal values returned by ffmpeg
+    local number=$1
+    echo $number | awk '{printf("%d\n",$1 + 0.5)}'
+}
+
 function log_line () {
     local level=$1
     shift
@@ -79,6 +85,45 @@ function clean_file_name () {
     echo $file_name
 }
 
+function build_crop_detect_args() {
+    # get arguments for ffmpeg to remove black bars from video files
+    local video_file=$1
+    local video_duration_seconds=$(round $(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video_file"))
+    local original_resolution=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$video_file")
+    local original_height=${original_resolution/*x/}
+    local original_width=${original_resolution/x*/}
+    local original_area=$((original_width * original_height))
+    local crop_lines=()
+    local crop_detect_argument=
+
+    # detect black bars at 4/6 points split throughout the middle of the video
+    for seconds in `seq $((video_duration_seconds / 6))  $((video_duration_seconds / 6)) $((video_duration_seconds - video_duration_seconds / 6))`
+    do
+        crop_lines+=($(ffmpeg -ss $seconds -i "$video_file" -vframes 10 -vf cropdetect -f null - 2>&1 | awk '/crop/ { print $NF }' | sed 's/crop=//' | tail -1))
+    done
+
+    # take the average of all cropdetect results
+    crop_detect_dimensions=$(for line in "${crop_lines[@]}"
+    do
+        echo $line
+    done | awk -F':' '{for (i=1;i<=NF;i++){a[i]+=$i;}} END {for (i=1;i<=NF;i++){printf "%.0f", a[i]/NR; printf ":"};printf "\n"}' | sed 's/:$//')
+
+    local cropped_resolution=$(echo "${crop_detect_dimensions}" | sed 's/\(:[0-9]\{1,\}\)\{2\}$//')
+    local cropped_height=${cropped_resolution/*:/}
+    local cropped_width=${cropped_resolution/:*/}
+    local cropped_area=$((cropped_width * cropped_height))
+
+    # if the difference is too small or large we might as well not crop anything
+    if [ $(echo "($original_area - $cropped_area) < (.10 * $original_area)" | bc) -eq 1 -o  $(echo "($original_area - $cropped_area) > (.40 * $original_area)" | bc) -eq 1 ]
+    then
+        return 1
+    fi
+
+
+    echo "crop=${crop_detect_dimensions}"
+    return 0
+}
+
 function get_video_codec () {
     local video_file=$1
     local original_video_codec=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
@@ -95,7 +140,7 @@ function get_audio_codec () {
 function get_h264_level () {
     local video_file=$1
     local original_level=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=level -of default=noprint_wrappers=1:nokey=1 "$video_file")
-    number_re='^[0-9]+$'
+    local number_re='^[0-9]+$'
     # any non-numerical is invalid
     if ! [[ $original_level =~ $number_re ]]
     then
@@ -163,9 +208,9 @@ function make_direct_play () {
     local bad_video_path=$(dirname "$bad_video_file")
     local bad_extension=${bad_video_file: -3}
     local video_file_name="${bad_video_file_name%????}"
-    local first_pass_video_output_file="${bad_video_path}/${video_file_name}_firstpass.mp4"
     local temp_output_file="${bad_video_path}/${video_file_name} temp.mp4"
     local final_output_file="$(clean_file_name "${bad_video_path}/${video_file_name}") fixed.mp4"
+    local ffmpeg_video_options=(${FFMPEG_VIDEO_OPTIONS[@]})
 
     # set GPU device
     local ffmpeg_options=(${FFMPEG_OPTIONS[@]} -hwaccel_device $hwaccel_device)
@@ -181,13 +226,20 @@ function make_direct_play () {
 
     fi
     local ffmpeg_subtitle_options=(-c:s $output_subtitle_codec)
+
+    # remove black bars
+    local crop_option=$(build_crop_detect_args "$bad_video_file")
+    if [ $? -eq 0 ]
+    then
+        ffmpeg_video_options+=(-vf $crop_option)
+    fi
     # decide what GPU to use
     #GPU=$(hwaccel_device)
 
     log_line VERBOSE "Converting $bad_video_file_name with extension $bad_extension ..."
     log_line VERBOSE "Creating file: ${final_output_file}..."
 
-    timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${FFMPEG_VIDEO_OPTIONS[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
+    timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${ffmpeg_video_options[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
 
     #remove old files when done
     if [ $? -le 0 -a -f "$temp_output_file" ]
