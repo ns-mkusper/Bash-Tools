@@ -1,8 +1,17 @@
-#!/bin/bash -
+#!/usr/bin/env bash
 
-# audio device support on mac os isn't available with flite so we need
-# to output to wav and open it to get somewhat expected behavior
+# audio device support on mac os isn't available with flite so to read
+# stdin we need to output to wav and open it to get somewhat expected
+# behavior
+
+# USAGE: echo "read this aloud" | flite-wrapper
 
 TEXT=/dev/stdin
+TEMP_OUT_WAV=$(mktemp /tmp/flite.XXXXXXXXXX).wav
+TEMP_OUT_WAV_READ=${TEMP_OUT_WAV}.read.wav
+
 echo $TEXT
-flite "$TEXT" out.wav && sox out.wav out-fast-read.wav tempo 1.5 && mpv --no-audio-display out-fast-read.wav
+flite "$TEXT" ${TEMP_OUT_WAV} && \
+    sox ${TEMP_OUT_WAV} ${TEMP_OUT_WAV_READ} tempo 1.5 && \
+    mpv --no-audio-display ${TEMP_OUT_WAV_READ} && \
+    rm ${TEMP_OUT_WAV//.wav/}*
