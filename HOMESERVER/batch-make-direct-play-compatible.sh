@@ -114,7 +114,7 @@ function build_crop_detect_args() {
     local cropped_area=$((cropped_width * cropped_height))
 
     # if the difference is too small or large we might as well not crop anything
-    if [ $(echo "($original_area - $cropped_area) < (.10 * $original_area)" | bc) -eq 1 -o  $(echo "($original_area - $cropped_area) > (.40 * $original_area)" | bc) -eq 1 ]
+    if [ $(echo "($original_area - $cropped_area) < (.05 * $original_area)" | bc) -eq 1 -o  $(echo "($original_area - $cropped_area) > (.40 * $original_area)" | bc) -eq 1 ]
     then
         return 1
     fi
