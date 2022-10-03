@@ -96,8 +96,8 @@ function build_crop_detect_args() {
     local crop_lines=()
     local crop_detect_argument=
 
-    # detect black bars at 4/6 points split throughout the middle of the video
-    for seconds in `seq $((video_duration_seconds / 6))  $((video_duration_seconds / 6)) $((video_duration_seconds - video_duration_seconds / 6))`
+    # detect black bars at 6/8 points split throughout the middle of the video
+    for seconds in `seq $((video_duration_seconds  / 8))  $((video_duration_seconds  / 8)) $((video_duration_seconds - video_duration_seconds  / 8))`
     do
         crop_lines+=($(ffmpeg -ss $seconds -i "$video_file" -vframes 10 -vf cropdetect -f null - 2>&1 | awk '/crop/ { print $NF }' | sed 's/crop=//' | tail -1))
     done
