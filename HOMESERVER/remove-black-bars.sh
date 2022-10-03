@@ -56,10 +56,7 @@ function build_crop_detect_args() {
     done
 
     # take the average of all cropdetect results
-    crop_detect_dimensions=$(for line in "${crop_lines[@]}"
-                             do
-                                 echo $line
-                             done | awk -F':' '{for (i=1;i<=NF;i++){a[i]+=$i;}} END {for (i=1;i<=NF;i++){printf "%.0f", a[i]/NR; printf ":"};printf "\n"}' | sed 's/:$//')
+    local crop_detect_dimensions=$(printf '%s\n' "${crop_lines[@]}" | sort | uniq -c | sort -k1,1nr -k2 | awk '{print $2; exit}')
 
     local cropped_resolution=$(echo "${crop_detect_dimensions}" | sed 's/\(:[0-9]\{1,\}\)\{2\}$//')
     local cropped_height=${cropped_resolution/*:/}
