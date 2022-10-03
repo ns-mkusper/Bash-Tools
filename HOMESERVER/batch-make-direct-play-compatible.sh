@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# makes media server library video files play nicely with plex
-# direct-play
+# converts video files to direct play them over plex through
+# chromecast devices
 # ref: https://developers.google.com/cast/docs/media
 
 # ARGUMENTS
@@ -114,7 +114,7 @@ function build_crop_detect_args() {
     local cropped_area=$((cropped_width * cropped_height))
 
     # if the difference is too small or large we might as well not crop anything
-    if [ $(echo "($original_area - $cropped_area) < (.05 * $original_area)" | bc) -eq 1 -o  $(echo "($original_area - $cropped_area) > (.40 * $original_area)" | bc) -eq 1 ]
+    if [ $(echo "($original_area - $cropped_area) < (.05 * $original_area) || ($original_area - $cropped_area) > (.40 * $original_area)" | bc) -eq 1 ]
     then
         return 1
     fi
@@ -229,7 +229,7 @@ function make_direct_play () {
 
     # remove black bars
     local crop_option=$(build_crop_detect_args "$bad_video_file")
-    if [ $? -eq 0 ]
+    if [ ! -z $crop_option ]
     then
         ffmpeg_video_options+=(-vf $crop_option)
     fi
