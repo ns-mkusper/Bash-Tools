@@ -261,7 +261,7 @@ function make_direct_play () {
         local size_of_output=$(stat -c '%s' "$temp_output_file")
         local sub_count_of_output=$(get_subtitles_count "$temp_output_file")
         local sub_count_of_original=$(get_subtitles_count "$bad_video_file")
-        if [ $size_of_output -gt 9074118 -a $sub_count_of_output -eq $sub_count_of_original ]
+        if [ $size_of_output -gt 9074118 -a $sub_count_of_output -ge $sub_count_of_original ]
         then
             rm "$bad_video_file"
             mv "${temp_output_file}" "${final_output_file}"
