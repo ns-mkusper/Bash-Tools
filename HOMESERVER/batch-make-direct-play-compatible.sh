@@ -284,7 +284,7 @@ function make_direct_play_with(){
     local next=
     while
         # lock the file, and pop one line from the video files list
-        while ! next=$((flock -n 9 || exit 1; sed -e \$$'{w/dev/stdout\n;d}' -i~ "$FILTERED_TEMP_VIDEO_FILES_LIST") 9> ${FILTERED_TEMP_VIDEO_FILES_LIST}.lock)
+        while ! next=$((flock -n 9 || exit 1; sed -e \$$'{w/dev/stdout\n;d}' -i~ "$REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST") 9> ${REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST}.lock)
         do :; done
         # if there is no next line; we're done
         [[ -n $next ]]
@@ -311,6 +311,9 @@ then
     export -f log_line
     # build up list of videos we need to check & convert (if needed)
     find ${SEARCH_DIRECTORIES[@]} -size +50M \( -iname \*.262 -or -iname \*.263 -or -iname \*.264 -or -iname \*.3g2 -or -iname \*.3gp -or -iname \*.723 -or -iname \*.amv -or -iname \*.asf -or -iname \*.avi -or -iname \*.drc -or -iname \*.f4a -or -iname \*.f4b -or -iname \*.f4p -or -iname \*.f4v -or -iname \*.flv -or -iname \*.gif -or -iname \*.gifv -or -iname \*.M2TS -or -iname \*.m2v -or -iname \*.m4p -or -iname \*.m4v -or -iname \*.mkv -or -iname \*.mng -or -iname \*.mov -or -iname \*.mp2 -or -iname \*.mp4 -or -iname \*.mpe -or -iname \*.mpeg -or -iname \*.mpg -or -iname \*.mpv -or -iname \*.MTS -or -iname \*.mxf -or -iname \*.net -or -iname \*.nsv -or -iname \*.ogg -or -iname \*.ogv -or -iname \*.rmvb -or -iname \*.roq -or -iname \*.svi -or -iname \*.viv -or -iname \*.vob -or -iname \*.webm -or -iname \*.wmv -or -iname \*.yuv \) -newer /mnt/data1/tv/start_time -printf "%T@ %Tc %p\n" | sort ${SORT_OPTIONS[@]} | sed 's/.* [0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\} [A-Z]\{2\} [A-Z]\{3\} //' | parallel --silent --jobs 10 "filter_video_list "{}" $FILTERED_TEMP_VIDEO_FILES_LIST"
+
+    # we pop file lines off the bottom of the file
+    tac "$FILTERED_TEMP_VIDEO_FILES_LIST" > "$REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST"
 
 
 
