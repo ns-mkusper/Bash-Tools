@@ -49,7 +49,7 @@ FFMPEG_OPTIONS=(-analyzeduration 2000000000 -probesize 2000000000 -loglevel $FFM
 # map all input streams to output streams except mjpeg and
 # attachments which are unsupported in the direct_play codecs
 # TODO: Do we wanna handle them in some way?
-FFMPEG_INPUT_OPTIONS=(-map V -map 0:a -map -0:s)
+FFMPEG_INPUT_OPTIONS=(-map V -map 0:a)
 # output options ensured to be directy play compliant across all
 # chromecast devices
 FFMPEG_VIDEO_OPTIONS=(-c:v h264_nvenc -minrate $DECODER_MIN_RATE -maxrate $DECODER_MAX_RATE -bufsize $DECODER_BUFFER_SIZE -profile:v $H264_OUTPUT_PROFILE -level:v $H264_OUTPUT_LEVEL -movflags +faststart -pix_fmt yuv420p)
@@ -119,6 +119,19 @@ function build_crop_detect_args() {
 
     echo "crop=${crop_detect_dimensions}"
     return 0
+}
+
+function get_subtitles_count () {
+    # get subtitle count of video file
+    local video_file=$1
+    local subtitle_count=$(ffprobe -loglevel quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | wc -l)
+    echo $subtitle_count
+}
+
+function get_subtitle_map () {
+    # get the full ffmpeg cli -map... sequence for subtitle streams for a given video file
+    local video_file=$1
+    ffprobe -loglevel quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:s:m:language:\2/'
 }
 
 function get_video_codec () {
@@ -199,7 +212,7 @@ function make_direct_play () {
     # TODO: grab subs in this case
     if [ -z "$(get_subtitle_codec "$bad_video_file")" ]
     then
-	continue
+        continue
     fi
     local bad_video_file_name=$(basename "$bad_video_file")
     local bad_video_path=$(dirname "$bad_video_file")
@@ -215,7 +228,7 @@ function make_direct_play () {
     local input_subtitle_codec=$(get_subtitle_codec "$bad_video_file")
     if [[ $input_subtitle_codec == hdmv* || $input_subtitle_codec == "dvd"* || $input_subtitle_codec == "pgsub" || $input_subtitle_codec == "xsub" ]]
     then
-	# TODO: OCR bitmap subs (they can't be direct played)?
+        # TODO: OCR bitmap subs (they can't be direct played)?
         local output_subtitle_codec="dvd_subtitle"
         # FFMPEG_INPUT_OPTIONS+=(-map -0:s)
     else
@@ -223,6 +236,10 @@ function make_direct_play () {
 
     fi
     local ffmpeg_subtitle_options=(-c:s $output_subtitle_codec)
+
+    # set correct input subtitle mapping options
+    readarray -t subtitle_mapping < <(get_subtitle_map "$bad_video_file")
+    FFMPEG_INPUT_OPTIONS=(${FFMPEG_INPUT_OPTIONS[@]} ${subtitle_mapping[@]})
 
     # remove black bars
     local crop_option=$(build_crop_detect_args "$bad_video_file")
@@ -242,18 +259,21 @@ function make_direct_play () {
     if [ $? -le 0 -a -f "$temp_output_file" ]
     then
         local size_of_output=$(stat -c '%s' "$temp_output_file")
-	if [ $size_of_output -gt 9074118 ]
+        local sub_count_of_output=$(get_subtitles_count "$temp_output_file")
+        local sub_count_of_original=$(get_subtitles_count "$bad_video_file")
+        if [ $size_of_output -gt 9074118 -a $sub_count_of_output -eq $sub_count_of_original ]
         then
-	    rm "$bad_video_file"
+            rm "$bad_video_file"
             mv "${temp_output_file}" "${final_output_file}"
         else
             rm "$temp_output_file"
+            log_line ERROR "ERROR: ${temp_output_file} failed check! Deleting and preserving original video file..."
             if [ $DELETE_CORRUPTED_VIDEO_FILES == "TRUE" ]
             then
                 log_line VERBOSE "Deleting corrupt ${bad_video_file} ..."
                 rm "$bad_video_file"
             fi
-	fi
+        fi
     fi
 
 
