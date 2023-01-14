@@ -284,7 +284,7 @@ function make_direct_play_with(){
     local next=
     while
         # lock the file, and pop one line from the video files list
-        while ! next=$((flock -n 9 || exit 1; sed -e \$$'{w/dev/stdout\n;d}' -i~ "REVERSED_$FILTERED_TEMP_VIDEO_FILES_LIST") 9> ${REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST}.lock)
+        while ! next=$((flock -n 9 || exit 1; sed -e \$$'{w/dev/stdout\n;d}' -i~ "REVERSED_$FILTERED_TEMP_VIDEO_FILES_LIST") 9> REVERSED_${FILTERED_TEMP_VIDEO_FILES_LIST}.lock)
         do :; done
         # if there is no next line; we're done
         [[ -n $next ]]
