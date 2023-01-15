@@ -125,14 +125,14 @@ function build_crop_detect_args() {
 function get_subtitles_count () {
     # get subtitle count of video file
     local video_file=$1
-    local subtitle_count=$(ffprobe -loglevel quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | wc -l)
+    local subtitle_count=$(ffprobe -loglevel $FFMPEG_LOG_LEVEL  -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | wc -l)
     echo $subtitle_count
 }
 
 function get_subtitle_map () {
     # get the full ffmpeg cli -map... sequence for subtitle streams for a given video file
     local video_file=$1
-    ffprobe -loglevel quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:s:m:language:\2/'
+    ffprobe -loglevel $FFMPEG_LOG_LEVEL -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:s:m:language:\2/'
 }
 
 function get_video_codec () {
