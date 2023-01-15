@@ -50,7 +50,7 @@ FFMPEG_OPTIONS=(-analyzeduration 2000000000 -probesize 2000000000 -loglevel $FFM
 # map all input streams to output streams except mjpeg and
 # attachments which are unsupported in the direct_play codecs
 # TODO: Do we wanna handle them in some way?
-FFMPEG_INPUT_OPTIONS=(-map V -map 0:a)
+FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS=(-map V -map 0:a)
 # output options ensured to be directy play compliant across all
 # chromecast devices
 FFMPEG_VIDEO_OPTIONS=(-c:v h264_nvenc -minrate $DECODER_MIN_RATE -maxrate $DECODER_MAX_RATE -bufsize $DECODER_BUFFER_SIZE -profile:v $H264_OUTPUT_PROFILE -level:v $H264_OUTPUT_LEVEL -movflags +faststart -pix_fmt yuv420p)
@@ -240,7 +240,7 @@ function make_direct_play () {
 
     # set correct input subtitle mapping options
     readarray -t subtitle_mapping < <(get_subtitle_map "$bad_video_file")
-    FFMPEG_INPUT_OPTIONS=(${FFMPEG_INPUT_OPTIONS[@]} ${subtitle_mapping[@]})
+    FFMPEG_INPUT_OPTIONS=(${FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS[@]} ${subtitle_mapping[@]})
 
     # remove black bars
     local crop_option=$(build_crop_detect_args "$bad_video_file")
