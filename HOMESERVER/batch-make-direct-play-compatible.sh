@@ -89,7 +89,7 @@ function clean_file_name () {
 function build_crop_detect_args() {
     # get arguments for ffmpeg to remove black bars from video files
     local video_file=$1
-    local video_duration_seconds=$(round $(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video_file"))
+    local video_duration_seconds=$(round $(ffprobe -v $FFMPEG_LOG_LEVEL -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video_file"))
     local original_resolution=$(ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$video_file")
     local original_height=${original_resolution/*x/}
     local original_width=${original_resolution/x*/}
@@ -125,32 +125,32 @@ function build_crop_detect_args() {
 function get_subtitles_count () {
     # get subtitle count of video file
     local video_file=$1
-    local subtitle_count=$(ffprobe -loglevel $FFMPEG_LOG_LEVEL  -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | wc -l)
+    local subtitle_count=$(ffprobe -v $FFMPEG_LOG_LEVEL  -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | wc -l)
     echo $subtitle_count
 }
 
 function get_subtitle_map () {
     # get the full ffmpeg cli -map... sequence for subtitle streams for a given video file
     local video_file=$1
-    ffprobe -loglevel $FFMPEG_LOG_LEVEL -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:s:m:language:\2/'
+    ffprobe -v $FFMPEG_LOG_LEVEL -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:s:m:language:\2/'
 }
 
 function get_video_codec () {
     local video_file=$1
-    local original_video_codec=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
+    local original_video_codec=$(ffprobe -v $FFMPEG_LOG_LEVEL -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
     # check if the video file is direct-play-ready
     echo $original_video_codec
 }
 
 function get_audio_codec () {
     local video_file=$1
-    local original_audio_codec=$(ffprobe -v quiet -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
+    local original_audio_codec=$(ffprobe -v $FFMPEG_LOG_LEVEL -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
     echo $original_audio_codec
 }
 
 function get_h264_level () {
     local video_file=$1
-    local original_level=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=level -of default=noprint_wrappers=1:nokey=1 "$video_file")
+    local original_level=$(ffprobe -v $FFMPEG_LOG_LEVEL -select_streams v:0 -show_entries stream=level -of default=noprint_wrappers=1:nokey=1 "$video_file")
     local number_re='^[0-9]+$'
     # any non-numerical is invalid
     if ! [[ $original_level =~ $number_re ]]
@@ -163,13 +163,13 @@ function get_h264_level () {
 
 function get_h264_profile () {
     local video_file=$1
-    local original_profile=$(ffprobe -v quiet -select_streams v:0 -show_entries stream=profile -of default=noprint_wrappers=1:nokey=1 "$video_file")
+    local original_profile=$(ffprobe -v $FFMPEG_LOG_LEVEL -select_streams v:0 -show_entries stream=profile -of default=noprint_wrappers=1:nokey=1 "$video_file")
     echo $original_profile
 }
 
 function get_subtitle_codec () {
     local video_file=$1
-    local original_subtitle_codec=$(ffprobe -v quiet -select_streams s:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
+    local original_subtitle_codec=$(ffprobe -v $FFMPEG_LOG_LEVEL -select_streams s:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
     echo $original_subtitle_codec
 }
 
