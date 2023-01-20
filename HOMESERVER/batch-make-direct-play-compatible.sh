@@ -227,7 +227,7 @@ function make_direct_play () {
     local ffmpeg_options=(${FFMPEG_OPTIONS[@]} -hwaccel_device $hwaccel_device)
     # set correct subtitle options
     local input_subtitle_codec=$(get_subtitle_codec "$bad_video_file")
-    if [[ $input_subtitle_codec == hdmv* || $input_subtitle_codec == "dvd"* || $input_subtitle_codec == "pgsub" || $input_subtitle_codec == "xsub" ]]
+    if [[ $input_subtitle_codec == hdmv* || $input_subtitle_codec == "dvd"* || $input_subtitle_codec == *"pgs"* || $input_subtitle_codec == "xsub" ]]
     then
         # TODO: OCR bitmap subs (they can't be direct played)?
         local output_subtitle_codec="dvd_subtitle"
