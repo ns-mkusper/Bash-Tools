@@ -10,8 +10,8 @@ RUN_MULTIPLE=${1:-FALSE}
 ORDER=${2:-newest}
 DELETE_CORRUPTED_VIDEO_FILES=${3:-FALSE}
 H264_OUTPUT_PROFILE=${4:-high}
-# TODO: figure out why latest google tv chromecast isn't supported >4.2 directplay
-H264_OUTPUT_LEVEL=${5:-4.2}
+# 4.1 works on basically every chromecast gen
+H264_OUTPUT_LEVEL=${5:-4.1}
 DECODER_BUFFER_SIZE=${6:-32000k}
 DECODER_MIN_RATE=${7:-4500k}
 DECODER_MAX_RATE=${8:-16000k} # ~80% of total upload speed
