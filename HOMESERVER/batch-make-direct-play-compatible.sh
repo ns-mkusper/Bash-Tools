@@ -10,6 +10,7 @@ RUN_MULTIPLE=${1:-FALSE}
 ORDER=${2:-newest}
 DELETE_CORRUPTED_VIDEO_FILES=${3:-FALSE}
 H264_OUTPUT_PROFILE=${4:-high}
+# TODO: figure out why latest google tv chromecast isn't supported >4.2 directplay
 H264_OUTPUT_LEVEL=${5:-4.2}
 DECODER_BUFFER_SIZE=${6:-32000k}
 DECODER_MIN_RATE=${7:-4500k}
@@ -181,7 +182,7 @@ function is_direct_play_ready () {
     local original_profile=$(get_h264_profile "$video_file")
     # check if the video file is direct-play-ready
     # check h264 profile (High works across all chromecast devices) and level (oldest chromecast needs <=41, while newer need >=42)
-    if [ "$original_video_codec" != 'h264' -o "$original_audio_codec" != 'aac' -o "$original_level" -gt 42 -o "$original_profile" != "High" ]
+    if [ "$original_video_codec" != 'h264' -o "$original_audio_codec" != 'aac' -o "$original_level" -gt $H264_OUTPUT_LEVEL -o "$original_profile" != "High" ]
     then
         return 1
     fi
