@@ -9,14 +9,14 @@ VERBOSE=${VERBOSE:-0}
 RUN_MULTIPLE=${1:-FALSE}
 ORDER=${2:-newest}
 DELETE_CORRUPTED_VIDEO_FILES=${3:-FALSE}
-H264_OUTPUT_PROFILE=${4:-main}
-H264_OUTPUT_LEVEL=${5:-5.1}
+H264_OUTPUT_PROFILE=${4:-high}
+H264_OUTPUT_LEVEL=${5:-4.2}
 DECODER_BUFFER_SIZE=${6:-32000k}
 DECODER_MIN_RATE=${7:-4500k}
 DECODER_MAX_RATE=${8:-16000k} # ~80% of total upload speed
 SEARCH_DIRECTORIES=(/mnt/data1/tv/ /mnt/data2/movies/)
 # SYSTEM INFERENCE
-# ref: https://nvidia.custhelp.com/app/answers/detail/a_id/3751/~/useful-nvidia-smi-queries
+# ref: https://nvidia.custhelp.com/app/answers/detail/a_id/3742/~/useful-nvidia-smi-queries
 GPU_COUNT=$(nvidia-smi -L | wc -l)
 
 if [ $ORDER == "newest" ]
@@ -46,7 +46,7 @@ FILTERED_TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-filtered-video-fil
 REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-reversed-filtered-video-files-list.XXXXXXXXX)
 
 # VIDEO CONVERTING / FFMPEG OPTIONS
-FFMPEG_OPTIONS=(-analyzeduration 2000000000 -probesize 2000000000 -loglevel $FFMPEG_LOG_LEVEL  -nostdin -hwaccel auto)
+FFMPEG_OPTIONS=(-analyzeduration 200000000 -probesize 200000000 -loglevel $FFMPEG_LOG_LEVEL  -nostdin -hwaccel auto)
 # map all input streams to output streams except mjpeg and
 # attachments which are unsupported in the direct_play codecs
 # TODO: Do we wanna handle them in some way?
@@ -180,8 +180,8 @@ function is_direct_play_ready () {
     local original_level=$(get_h264_level "$video_file")
     local original_profile=$(get_h264_profile "$video_file")
     # check if the video file is direct-play-ready
-    # check h264 profile (Main works across all chromecast devices) and level (oldest chromecast needs <=41, while newer need >=51)
-    if [ "$original_video_codec" != 'h264' -o "$original_audio_codec" != 'aac' -o "$original_level" -gt 51 -o "$original_profile" != "Main" ]
+    # check h264 profile (High works across all chromecast devices) and level (oldest chromecast needs <=41, while newer need >=42)
+    if [ "$original_video_codec" != 'h264' -o "$original_audio_codec" != 'aac' -o "$original_level" -gt 42 -o "$original_profile" != "High" ]
     then
         return 1
     fi
