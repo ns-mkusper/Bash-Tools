@@ -303,6 +303,19 @@ then
     log_line INFO "searching for video files newer than $(stat -c '%y' /mnt/data1/tv/start_time)"
 
 
+    # ensure parallel has access to all key variables
+    # TODO: use env_parallel
+    export VERBOSE=$VERBOSE
+    export RUN_MULTIPLE=$RUN_MULTIPLE
+    export ORDER=$ORDER
+    export DELETE_CORRUPTED_VIDEO_FILES=$DELETE_CORRUPTED_VIDEO_FILES
+    export H264_OUTPUT_PROFILE=$H264_OUTPUT_PROFILE
+    export H264_OUTPUT_LEVEL=$H264_OUTPUT_LEVEL
+    export DECODER_BUFFER_SIZE=$DECODER_BUFFER_SIZE
+    export DECODER_MIN_RATE=$DECODER_MIN_RATE
+    export DECODER_MAX_RATE=$DECODER_MAX_RATE
+    export SEARCH_DIRECTORIES=$SEARCH_DIRECTORIES
+    export GPU_COUNT=$GPU_COUNT
     export -f get_video_codec
     export -f get_audio_codec
     export -f get_h264_level
