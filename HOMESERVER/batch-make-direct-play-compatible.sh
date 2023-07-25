@@ -180,7 +180,16 @@ function is_direct_play_ready () {
     local original_audio_codec=$(get_audio_codec "$video_file")
     local original_level=$(get_h264_level "$video_file")
     local original_profile=$(get_h264_profile "$video_file")
+    # TODO: expand for 2 and 4 char ext
+    local original_file_extension=${video_file: -3}
     # check if the video file is direct-play-ready
+
+    # check if video file is mkv
+    # TODO: find out why mkv files with proper profiles, levels, etc do not direct-play (video stream transcodes)
+    if [ "${original_file_extension,,}" == "mkv" ]; then
+        return 1
+    fi
+
     # check h264 profile (High works across all chromecast devices) and level (oldest chromecast needs <=41, while newer need >=42)
     if [ "$original_video_codec" != 'h264' -o "$original_audio_codec" != 'aac' -o "$original_level" -gt ${H264_OUTPUT_LEVEL/\./} -o "$original_profile" != "High" ]
     then
@@ -218,6 +227,7 @@ function make_direct_play () {
     fi
     local bad_video_file_name=$(basename "$bad_video_file")
     local bad_video_path=$(dirname "$bad_video_file")
+    # TODO: expand for 2 and 4 char ext
     local bad_extension=${bad_video_file: -3}
     local video_file_name="${bad_video_file_name%????}"
     local temp_output_file="${bad_video_path}/${video_file_name} temp.mp4"
