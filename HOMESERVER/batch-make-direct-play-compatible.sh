@@ -47,7 +47,7 @@ FILTERED_TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-filtered-video-fil
 REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-reversed-filtered-video-files-list.XXXXXXXXX)
 
 # VIDEO CONVERTING / FFMPEG OPTIONS
-FFMPEG_OPTIONS=(-analyzeduration 200000000 -probesize 200000000 -loglevel $FFMPEG_LOG_LEVEL  -nostdin -hwaccel auto)
+FFMPEG_OPTIONS=(-fix_sub_duration -analyzeduration 200000000 -probesize 200000000 -loglevel $FFMPEG_LOG_LEVEL  -nostdin -hwaccel auto)
 # map all input streams to output streams except mjpeg and
 # attachments which are unsupported in the direct_play codecs
 # TODO: Do we wanna handle them in some way?
