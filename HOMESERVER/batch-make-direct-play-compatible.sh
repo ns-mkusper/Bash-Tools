@@ -133,7 +133,7 @@ function get_subtitles_count () {
 function get_subtitle_map () {
     # get the full ffmpeg cli -map... sequence for subtitle streams for a given video file
     local video_file=$1
-    ffprobe -v quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:s:m:language:\2/'
+    ffprobe -v quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:m:language:\2/'
 }
 
 function get_video_codec () {
@@ -265,7 +265,9 @@ function make_direct_play () {
     log_line VERBOSE "Converting $bad_video_file_name with extension $bad_extension ..."
     log_line VERBOSE "Creating file: ${final_output_file}..."
 
-    timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${ffmpeg_video_options[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
+    # timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${ffmpeg_video_options[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
+
+    echo     timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${ffmpeg_video_options[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
 
     #remove old files when done
     if [ $? -le 0 -a -f "$temp_output_file" ]
