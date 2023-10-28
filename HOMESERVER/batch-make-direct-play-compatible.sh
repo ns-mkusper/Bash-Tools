@@ -265,9 +265,9 @@ function make_direct_play () {
     log_line VERBOSE "Converting $bad_video_file_name with extension $bad_extension ..."
     log_line VERBOSE "Creating file: ${final_output_file}..."
 
-    # timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${ffmpeg_video_options[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
+    timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${ffmpeg_video_options[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
 
-    echo     timeout -s9 -k 5 600m ffmpeg ${ffmpeg_options[@]} -i "$bad_video_file" ${FFMPEG_INPUT_OPTIONS[@]} ${ffmpeg_video_options[@]} ${FFMPEG_AUDIO_OPTIONS[@]} ${ffmpeg_subtitle_options[@]} "${temp_output_file}" -y
+
 
     #remove old files when done
     if [ $? -le 0 -a -f "$temp_output_file" ]
