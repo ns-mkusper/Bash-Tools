@@ -133,7 +133,7 @@ function get_subtitles_count () {
 function get_subtitle_map () {
     # get the full ffmpeg cli -map... sequence for subtitle streams for a given video file
     local video_file=$1
-    ffprobe -v quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:m:language:\2/'
+    ffprobe -v quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:m:language:\2/' | sed 's/^\([0-9]\{1,\}\)$/-map 0:m:language:\1/'
 }
 
 function get_video_codec () {
