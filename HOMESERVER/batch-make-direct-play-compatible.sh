@@ -239,7 +239,6 @@ function make_direct_play () {
     local ffmpeg_options=(${FFMPEG_OPTIONS[@]} -hwaccel_device $hwaccel_device)
     # set correct subtitle options
     local input_subtitle_codecs=$(get_subtitle_codecs "$bad_video_file")
-    -c:s $output_subtitle_codec
     local ffmpeg_subtitle_options=()
 
     subtitle_stream=0
