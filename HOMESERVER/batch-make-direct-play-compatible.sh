@@ -253,7 +253,7 @@ function make_direct_play () {
             local output_subtitle_codec="mov_text"
 
         fi
-        fmpeg_subtitle_options+=(-c:s:${subtitle_stream} $output_subtitle_codec)
+        ffmpeg_subtitle_options+=(-c:s:${subtitle_stream} $output_subtitle_codec)
         let subtitle_stream++
     done
 
