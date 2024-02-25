@@ -168,9 +168,10 @@ function get_h264_profile () {
     echo $original_profile
 }
 
-function get_subtitle_codec () {
+function get_subtitle_codecs () {
+    # return codecs for each subtitle stream
     local video_file=$1
-    local original_subtitle_codec=$(ffprobe -v quiet -select_streams s:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
+    local original_subtitle_codec=$(ffprobe -v quiet -select_streams s -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video_file")
     echo $original_subtitle_codec
 }
 
@@ -237,17 +238,24 @@ function make_direct_play () {
     # set GPU device
     local ffmpeg_options=(${FFMPEG_OPTIONS[@]} -hwaccel_device $hwaccel_device)
     # set correct subtitle options
-    local input_subtitle_codec=$(get_subtitle_codec "$bad_video_file")
-    if [[ $input_subtitle_codec == hdmv* || $input_subtitle_codec == "dvd"* || $input_subtitle_codec == *"pgs"* || $input_subtitle_codec == "xsub" ]]
-    then
-        # TODO: OCR bitmap subs (they can't be direct played)?
-        local output_subtitle_codec="dvd_subtitle"
-        # FFMPEG_INPUT_OPTIONS+=(-map -0:s)
-    else
-        local output_subtitle_codec="mov_text"
+    local input_subtitle_codecs=$(get_subtitle_codec "$bad_video_file")
+    -c:s $output_subtitle_codec
+    local ffmpeg_subtitle_options=()
 
-    fi
-    local ffmpeg_subtitle_options=(-c:s $output_subtitle_codec)
+    subtitle_stream=0
+    for subtitle_codec in input_subtitle_codecs; do
+        if [[ $input_subtitle_codec == hdmv* || $input_subtitle_codec == "dvd"* || $input_subtitle_codec == *"pgs"* || $input_subtitle_codec == "xsub" ]]
+        then
+            # TODO: OCR bitmap subs (they can't be direct played)?
+            local output_subtitle_codec="dvd_subtitle"
+            # FFMPEG_INPUT_OPTIONS+=(-map -0:s)
+        else
+            local output_subtitle_codec="mov_text"
+
+        fi
+        fmpeg_subtitle_options+=(-c:s:${subtitle_stream} $output_subtitle_codec)
+        let subtitle_stream++
+    done
 
     # set correct input subtitle mapping options
     readarray -t subtitle_mapping < <(get_subtitle_map "$bad_video_file")
