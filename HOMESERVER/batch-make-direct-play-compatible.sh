@@ -222,7 +222,7 @@ function make_direct_play () {
 
     # skip if the only reason we're converting is lack of subs
     # TODO: grab subs in this case
-    if [ -z "$(get_subtitle_codec "$bad_video_file")" ]
+    if [ -z "$(get_subtitle_codecs "$bad_video_file")" ]
     then
         continue
     fi
@@ -238,7 +238,7 @@ function make_direct_play () {
     # set GPU device
     local ffmpeg_options=(${FFMPEG_OPTIONS[@]} -hwaccel_device $hwaccel_device)
     # set correct subtitle options
-    local input_subtitle_codecs=$(get_subtitle_codec "$bad_video_file")
+    local input_subtitle_codecs=$(get_subtitle_codecs "$bad_video_file")
     -c:s $output_subtitle_codec
     local ffmpeg_subtitle_options=()
 
@@ -340,7 +340,7 @@ then
     export -f get_audio_codec
     export -f get_h264_level
     export -f get_h264_profile
-    export -f get_subtitle_codec
+    export -f get_subtitle_codecs
     export -f is_direct_play_ready
     export -f filter_video_list
     export -f log_line
