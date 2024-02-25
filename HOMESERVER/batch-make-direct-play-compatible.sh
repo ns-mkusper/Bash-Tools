@@ -243,7 +243,7 @@ function make_direct_play () {
     local ffmpeg_subtitle_options=()
 
     subtitle_stream=0
-    for subtitle_codec in input_subtitle_codecs; do
+    for subtitle_codec in ${input_subtitle_codecs[@]}; do
         if [[ $input_subtitle_codec == hdmv* || $input_subtitle_codec == "dvd"* || $input_subtitle_codec == *"pgs"* || $input_subtitle_codec == "xsub" ]]
         then
             # TODO: OCR bitmap subs (they can't be direct played)?
