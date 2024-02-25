@@ -243,7 +243,7 @@ function make_direct_play () {
 
     subtitle_stream=0
     for subtitle_codec in ${input_subtitle_codecs[@]}; do
-        if [[ $input_subtitle_codec == hdmv* || $input_subtitle_codec == "dvd"* || $input_subtitle_codec == *"pgs"* || $input_subtitle_codec == "xsub" ]]
+        if [[ $subtitle_codec == hdmv* || $subtitle_codec == "dvd"* || $subtitle_codec == *"pgs"* || $subtitle_codec == "xsub" ]]
         then
             # TODO: OCR bitmap subs (they can't be direct played)?
             local output_subtitle_codec="dvd_subtitle"
