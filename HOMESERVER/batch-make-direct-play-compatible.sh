@@ -50,10 +50,10 @@ REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-reversed-
 
 # VIDEO CONVERTING / FFMPEG OPTIONS
 FFMPEG_OPTIONS=(-fix_sub_duration -analyzeduration 200000000 -probesize 200000000 -loglevel $FFMPEG_LOG_LEVEL  -nostdin -hwaccel auto)
-# map all input streams to output streams except mjpeg and
+# map all input streams from to output streams except mjpeg and
 # attachments which are unsupported in the direct_play codecs
 # TODO: Do we wanna handle them in some way?
-FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS=(-map V -map 0:a)
+FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS=(-map 0:v -map 0:a)
 # output options ensured to be directy play compliant across all
 # chromecast devices
 FFMPEG_VIDEO_OPTIONS=(-c:v h264_nvenc -minrate $DECODER_MIN_RATE -maxrate $DECODER_MAX_RATE -bufsize $DECODER_BUFFER_SIZE -profile:v $H264_OUTPUT_PROFILE -level:v $H264_OUTPUT_LEVEL -movflags +faststart -pix_fmt yuv420p)
@@ -270,7 +270,8 @@ function make_direct_play () {
     # set correct input subtitle metadata mapping options
     # TODO: figure out if this is still needed after assigning per-sub-stream codecs
     # readarray -t subtitle_metadata_mapping < <(get_subtitle_metadata_map "$bad_video_file")
-    # FFMPEG_INPUT_OPTIONS=(${FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS[@]} ${subtitle_metadata_mapping[@]})
+    FFMPEG_INPUT_OPTIONS=(${FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS[@]} # ${subtitle_metadata_mapping[@]}
+                         )
 
     # remove black bars
     local crop_option=$(build_crop_detect_args "$bad_video_file")
@@ -361,7 +362,7 @@ then
          -newer /mnt/data1/tv/start_time -printf "%T@ %Tc %p\n" \
         | sort ${SORT_OPTIONS[@]} \
         | sed 's/.* [0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\} [A-Z]\{2\} [A-Z]\{3\} //' \
-        | parallel --silent --jobs 10 "filter_video_list "{}" $FILTERED_TEMP_VIDEO_FILES_LIST"
+        | parallel --silent --jobs 10 "filter_video_list "{}" $FILTERED_TEMP_VIDEO_FILES_LIST" # check all found files in parallel
 
     # pop file lines off the bottom of the file
     tac "$FILTERED_TEMP_VIDEO_FILES_LIST" > "$REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST"
