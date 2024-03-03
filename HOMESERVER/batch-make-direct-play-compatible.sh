@@ -140,11 +140,11 @@ function get_subtitles_count () {
     echo $subtitle_count
 }
 
-function get_subtitle_map () {
-    # get the full ffmpeg cli -map... sequence for subtitle streams for a given video file
-    local video_file=$1
-    ffprobe -v quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:m:language:\2/' | sed 's/^\([0-9]\{1,\}\)$/-map 0:m:language:\1/'
-}
+# function get_subtitle_metadata_map () {
+#     # get the full ffmpeg cli -map... sequence for subtitle streams for a given video file
+#     local video_file=$1
+#     ffprobe -v quiet -select_streams s -show_entries stream=index:stream_tags=language -of csv=p=0 -i "$video_file" | sed 's/\([0-9]\{1,\}\),\([a-z0-9]\{1,\}\)/-map 0:m:language:\2/' | sed 's/^\([0-9]\{1,\}\)$/-map 0:m:language:\1/'
+# }
 
 function get_video_codec () {
     local video_file=$1
@@ -241,8 +241,9 @@ function make_direct_play () {
     # TODO: expand for 2 and 4 char ext
     local bad_extension=${bad_video_file: -3}
     local video_file_name="${bad_video_file_name%????}"
-    local temp_output_file="${bad_video_path}/${video_file_name} temp.mp4"
-    local final_output_file="$(clean_file_name "${bad_video_path}/${video_file_name}") fixed.mp4"
+    local good_extension=mp4 # TOOD: Support mkv and other direct-play-capable extensions? Any adavantage?
+    local temp_output_file="${bad_video_path}/${video_file_name} temp.${good_extension}"
+    local final_output_file="$(clean_file_name "${bad_video_path}/${video_file_name}") fixed.${good_extension}"
     local ffmpeg_video_options=(${FFMPEG_VIDEO_OPTIONS[@]})
 
     # set GPU device
@@ -266,9 +267,10 @@ function make_direct_play () {
         let subtitle_stream++
     done
 
-    # set correct input subtitle mapping options
-    readarray -t subtitle_mapping < <(get_subtitle_map "$bad_video_file")
-    FFMPEG_INPUT_OPTIONS=(${FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS[@]} ${subtitle_mapping[@]})
+    # set correct input subtitle metadata mapping options
+    # TODO: figure out if this is still needed after assigning per-sub-stream codecs
+    # readarray -t subtitle_metadata_mapping < <(get_subtitle_metadata_map "$bad_video_file")
+    # FFMPEG_INPUT_OPTIONS=(${FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS[@]} ${subtitle_metadata_mapping[@]})
 
     # remove black bars
     local crop_option=$(build_crop_detect_args "$bad_video_file")
@@ -355,7 +357,7 @@ then
     export -f log_line
     # build up list of videos we need to check & convert (if needed)
     find ${SEARCH_DIRECTORIES[@]} -size +50M \
-         \( -iname $(join_by " -or -iname \*." ${VIDEO_FILE_EXTENSIONS[@]}) \) \
+         \( -iname $(join_by " -or -iname *." ${VIDEO_FILE_EXTENSIONS[@]}) \) \
          -newer /mnt/data1/tv/start_time -printf "%T@ %Tc %p\n" \
         | sort ${SORT_OPTIONS[@]} \
         | sed 's/.* [0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\} [A-Z]\{2\} [A-Z]\{3\} //' \
