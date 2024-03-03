@@ -19,6 +19,8 @@ SEARCH_DIRECTORIES=(/mnt/data1/anime_shows/ /mnt/data1/tv/ /mnt/data2/movies/)
 # SYSTEM INFERENCE
 # ref: https://nvidia.custhelp.com/app/answers/detail/a_id/3742/~/useful-nvidia-smi-queries
 GPU_COUNT=$(nvidia-smi -L | wc -l)
+# TODO: switch to mimetype?
+VIDEO_FILE_EXTENSIONS=(262 263 264 3g2 3gp 723 amv asf avi drc f4a f4b f4p f4v flv gif gifv M2TS m2v m4p m4v mkv mng mov mp2 mp4 mpe mpeg mpg mpv MTS mxf net nsv ogg ogv rmvb roq svi viv vob webm wmv yuv)
 
 if [ $ORDER == "newest" ]
 then
@@ -56,6 +58,14 @@ FFMPEG_VIDEO_AUDIO_INPUT_OPTIONS=(-map V -map 0:a)
 # chromecast devices
 FFMPEG_VIDEO_OPTIONS=(-c:v h264_nvenc -minrate $DECODER_MIN_RATE -maxrate $DECODER_MAX_RATE -bufsize $DECODER_BUFFER_SIZE -profile:v $H264_OUTPUT_PROFILE -level:v $H264_OUTPUT_LEVEL -movflags +faststart -pix_fmt yuv420p)
 FFMPEG_AUDIO_OPTIONS=(-c:a aac)
+
+function join_by {
+    # join elements of an array $1 with a delimeter $2
+    local d=${1-} f=${2-}
+    if shift 2; then
+        printf %s "$f" "${@/#/$d}"
+    fi
+}
 
 function round() {
     # round decimal values returned by ffmpeg
@@ -252,7 +262,7 @@ function make_direct_play () {
             local output_subtitle_codec="mov_text"
 
         fi
-        ffmpeg_subtitle_options+=(-c:s:${subtitle_stream} $output_subtitle_codec)
+        ffmpeg_subtitle_options+=(-map 0:s:${subtitle_stream} -c:s:${subtitle_stream} $output_subtitle_codec)
         let subtitle_stream++
     done
 
@@ -344,12 +354,15 @@ then
     export -f filter_video_list
     export -f log_line
     # build up list of videos we need to check & convert (if needed)
-    find ${SEARCH_DIRECTORIES[@]} -size +50M \( -iname \*.262 -or -iname \*.263 -or -iname \*.264 -or -iname \*.3g2 -or -iname \*.3gp -or -iname \*.723 -or -iname \*.amv -or -iname \*.asf -or -iname \*.avi -or -iname \*.drc -or -iname \*.f4a -or -iname \*.f4b -or -iname \*.f4p -or -iname \*.f4v -or -iname \*.flv -or -iname \*.gif -or -iname \*.gifv -or -iname \*.M2TS -or -iname \*.m2v -or -iname \*.m4p -or -iname \*.m4v -or -iname \*.mkv -or -iname \*.mng -or -iname \*.mov -or -iname \*.mp2 -or -iname \*.mp4 -or -iname \*.mpe -or -iname \*.mpeg -or -iname \*.mpg -or -iname \*.mpv -or -iname \*.MTS -or -iname \*.mxf -or -iname \*.net -or -iname \*.nsv -or -iname \*.ogg -or -iname \*.ogv -or -iname \*.rmvb -or -iname \*.roq -or -iname \*.svi -or -iname \*.viv -or -iname \*.vob -or -iname \*.webm -or -iname \*.wmv -or -iname \*.yuv \) -newer /mnt/data1/tv/start_time -printf "%T@ %Tc %p\n" | sort ${SORT_OPTIONS[@]} | sed 's/.* [0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\} [A-Z]\{2\} [A-Z]\{3\} //' | parallel --silent --jobs 10 "filter_video_list "{}" $FILTERED_TEMP_VIDEO_FILES_LIST"
+    find ${SEARCH_DIRECTORIES[@]} -size +50M \
+         \( -iname $(join_by " -or -iname \*." ${VIDEO_FILE_EXTENSIONS[@]}) \) \
+         -newer /mnt/data1/tv/start_time -printf "%T@ %Tc %p\n" \
+        | sort ${SORT_OPTIONS[@]} \
+        | sed 's/.* [0-9]\{2\}:[0-9]\{2\}:[0-9]\{2\} [A-Z]\{2\} [A-Z]\{3\} //' \
+        | parallel --silent --jobs 10 "filter_video_list "{}" $FILTERED_TEMP_VIDEO_FILES_LIST"
 
-    # we pop file lines off the bottom of the file
+    # pop file lines off the bottom of the file
     tac "$FILTERED_TEMP_VIDEO_FILES_LIST" > "$REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST"
-
-
 
     NUMBER_OF_FILES_TO_CONVERT=$(wc -l $FILTERED_TEMP_VIDEO_FILES_LIST | sed 's/ .*//')
     log_line INFO "Converting [ $NUMBER_OF_FILES_TO_CONVERT ] files to direct-play comatible format..."
