@@ -191,6 +191,7 @@ function is_direct_play_ready () {
     local original_audio_codec=$(get_audio_codec "$video_file")
     local original_level=$(get_h264_level "$video_file")
     local original_profile=$(get_h264_profile "$video_file")
+    # TODO: Add subtitle check (needed? all subs in the right container might be guaranteed to be direct-play compat)
     # TODO: expand for 2 and 4 char ext
     local original_file_extension=${video_file: -3}
     # check if the video file is direct-play-ready
