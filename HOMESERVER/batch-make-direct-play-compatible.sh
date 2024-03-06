@@ -85,7 +85,7 @@ function log_line () {
     fi
 }
 
-function clean_file_name () {
+function clean_output_file_name () {
     # remove script artifacts from filename
     local file_name=$1
     # ensure we're not adding multiple 'fixed' tags in filename
@@ -244,7 +244,7 @@ function make_direct_play () {
     local video_file_name="${bad_video_file_name%????}"
     local good_extension=mp4 # TOOD: Support mkv and other direct-play-capable extensions? Any adavantage?
     local temp_output_file="${bad_video_path}/${video_file_name} temp.${good_extension}"
-    local final_output_file="$(clean_file_name "${bad_video_path}/${video_file_name}") fixed.${good_extension}"
+    local final_output_file="$(clean_output_file_name "${bad_video_path}/${video_file_name}") fixed.${good_extension}"
     local ffmpeg_video_options=(${FFMPEG_VIDEO_OPTIONS[@]})
 
     # set GPU device
