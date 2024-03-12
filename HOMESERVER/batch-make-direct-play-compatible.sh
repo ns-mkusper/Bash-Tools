@@ -47,6 +47,7 @@ fi
 TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-video-files-list.XXXXXXXXX)
 FILTERED_TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-filtered-video-files-list.XXXXXXXXX)
 REVERSED_FILTERED_TEMP_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-reversed-filtered-video-files-list.XXXXXXXXX)
+BAD_VIDEO_FILES_LIST=$(mktemp /tmp/make-direct-play-bad-video-files-list.XXXXXXXXX)
 
 # VIDEO CONVERTING / FFMPEG OPTIONS
 FFMPEG_OPTIONS=(-fix_sub_duration -analyzeduration 200000000 -probesize 200000000 -loglevel $FFMPEG_LOG_LEVEL  -nostdin -hwaccel auto)
@@ -296,6 +297,9 @@ function make_direct_play () {
         local size_of_output=$(stat -c '%s' "$temp_output_file")
         local sub_count_of_output=$(get_subtitles_count "$temp_output_file")
         local sub_count_of_original=$(get_subtitles_count "$bad_video_file")
+        local minimum_output_size=$((9 * 1024 * 1024)) # size of output considered successful
+        # TOOD: maybe base this on the original video size?
+
         if [ $size_of_output -gt 9074118 -a $sub_count_of_output -ge $sub_count_of_original ]
         then
             rm "$bad_video_file"
@@ -303,6 +307,8 @@ function make_direct_play () {
         else
             rm "$temp_output_file"
             log_line ERROR "ERROR: ${temp_output_file} failed check! Deleting and preserving original video file..."
+            echo "${bad_video_file}" >> "${BAD_VIDEO_FILES_LIST}"
+
             if [ $DELETE_CORRUPTED_VIDEO_FILES == "TRUE" ]
             then
                 log_line VERBOSE "Deleting corrupt ${bad_video_file} ..."
