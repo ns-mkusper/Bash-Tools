@@ -14,7 +14,7 @@ H264_OUTPUT_PROFILE=${4:-high}
 H264_OUTPUT_LEVEL=${5:-4.1}
 DECODER_BUFFER_SIZE=${6:-32000k}
 DECODER_MIN_RATE=${7:-4500k}
-DECODER_MAX_RATE=${8:-16000k} # ~80% of total upload speed
+DECODER_MAX_RATE=${8:-8000k} # ~80% of total upload speed
 SEARCH_DIRECTORIES=(/mnt/data1/anime_shows/ /mnt/data1/tv/ /mnt/data2/movies/)
 # SYSTEM INFERENCE
 # ref: https://nvidia.custhelp.com/app/answers/detail/a_id/3742/~/useful-nvidia-smi-queries
