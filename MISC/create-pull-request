@@ -52,6 +52,10 @@ BRANCH_NAME="$ISSUE_ID-$CLEAN_TITLE"
 echo "Checking out a new branch: $BRANCH_NAME from 'main'"
 git checkout -b "$BRANCH_NAME" main
 
+# Push the new branch to the remote repository
+echo "Pushing new branch to remote repository..."
+git push --set-upstream origin "$BRANCH_NAME"
+
 # Create the pull request
 echo "Creating a new pull request for issue #$ISSUE_ID..."
 # The --base flag explicitly sets the target branch for the PR to 'main'
@@ -60,5 +64,28 @@ gh pr create \
   --title "solves issue #$ISSUE_ID: $ISSUE_TITLE" \
   --body "This pull request addresses and solves issue #$ISSUE_ID. \n\n## Solves Issue \n\nsolves issue #$ISSUE_ID" \
   --web
+
+# Copy issue title and body to clipboard
+echo "Copying issue title and body to clipboard..."
+case "$(uname -s)" in
+    Darwin)
+        gh issue view "$ISSUE_ID" --json title,body --jq '.title + "\n\n" + .body' | pbcopy
+        ;;
+    Linux*)
+        if command -v xclip &> /dev/null; then
+            gh issue view "$ISSUE_ID" --json title,body --jq '.title + "\n\n" + .body' | xclip -selection clipboard
+        elif command -v xsel &> /dev/null; then
+            gh issue view "$ISSUE_ID" --json title,body --jq '.title + "\n\n" + .body' | xsel --clipboard
+        else
+            echo "Warning: Neither xclip nor xsel found. Could not copy to clipboard." >&2
+        fi
+        ;;
+    CYGWIN*|MINGW32*|MSYS*|MINGW64*)
+        gh issue view "$ISSUE_ID" --json title,body --jq '.title + "\n\n" + .body' | clip
+        ;;
+    *)
+        echo "Warning: Unsupported OS. Could not copy to clipboard." >&2
+        ;;
+esac
 
 echo "Pull request created successfully! The new branch is '$BRANCH_NAME'."
