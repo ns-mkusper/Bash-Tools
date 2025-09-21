@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Convert a text file to an mp3 using tts
 

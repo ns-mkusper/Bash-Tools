@@ -1,0 +1,64 @@
+#!/bin/bash
+
+# --- Script to create a new branch and open a PR for a GitHub issue ---
+
+# This script requires the GitHub CLI (`gh`) to be installed and authenticated.
+# Check out the gh documentation for installation instructions.
+# https://github.com/cli/cli#installation
+
+# --- Helper Functions ---
+
+# Function to display an error message and exit
+error_exit() {
+    echo "Error: $1" >&2
+    exit 1
+}
+
+# --- Main Script Logic ---
+
+# Check if gh is installed
+if ! command -v gh &> /dev/null; then
+    error_exit "GitHub CLI ('gh') is not installed. Please install it to use this script."
+fi
+
+# Check if an argument was provided
+if [ -z "$1" ]; then
+    error_exit "Please provide a GitHub issue ID or full URL as an argument."
+fi
+
+# Parse the issue link to get the issue ID
+if [[ "$1" =~ issues/([0-9]+) ]]; then
+    ISSUE_ID=${BASH_REMATCH[1]}
+elif [[ "$1" =~ ^[0-9]+$ ]]; then
+    ISSUE_ID="$1"
+else
+    error_exit "Invalid issue ID or URL format. Please provide a number (e.g., 22) or a full URL (e.g., https://github.com/.../issues/22)."
+fi
+
+# Use gh to get the issue title
+echo "Fetching details for issue #$ISSUE_ID..."
+ISSUE_TITLE=$(gh issue view "$ISSUE_ID" --json title --jq .title)
+
+# Check if the issue title was fetched successfully
+if [ -z "$ISSUE_TITLE" ]; then
+    error_exit "Could not find issue #$ISSUE_ID. Please check the issue ID and your repository permissions."
+fi
+
+# Sanitize the title to create a valid branch name
+CLEAN_TITLE=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]/-/g' -e 's/-\{2,\}/-/g' -e 's/^-//;s/-$//')
+BRANCH_NAME="$ISSUE_ID-$CLEAN_TITLE"
+
+# Checkout a new branch from 'main'
+echo "Checking out a new branch: $BRANCH_NAME from 'main'"
+git checkout -b "$BRANCH_NAME" main
+
+# Create the pull request
+echo "Creating a new pull request for issue #$ISSUE_ID..."
+# The --base flag explicitly sets the target branch for the PR to 'main'
+gh pr create \
+  --base main \
+  --title "solves issue #$ISSUE_ID: $ISSUE_TITLE" \
+  --body "This pull request addresses and solves issue #$ISSUE_ID. \n\n## Solves Issue \n\nsolves issue #$ISSUE_ID" \
+  --web
+
+echo "Pull request created successfully! The new branch is '$BRANCH_NAME'."

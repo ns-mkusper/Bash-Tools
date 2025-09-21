@@ -6,12 +6,12 @@
 
 # USAGE: echo "read this aloud" | flite-wrapper
 
-TEXT=/dev/stdin
 TEMP_OUT_WAV=$(mktemp /tmp/flite.XXXXXXXXXX).wav
 TEMP_OUT_WAV_READ=${TEMP_OUT_WAV}.read.wav
 
-echo $TEXT
-flite "$TEXT" ${TEMP_OUT_WAV} && \
-    sox ${TEMP_OUT_WAV} ${TEMP_OUT_WAV_READ} tempo 1.5 && \
-    mpv --no-audio-display ${TEMP_OUT_WAV_READ} && \
-    rm ${TEMP_OUT_WAV//.wav/}*
+while read -r text; do
+    flite -t "$text" -o ${TEMP_OUT_WAV} && \
+        sox ${TEMP_OUT_WAV} ${TEMP_OUT_WAV_READ} tempo 1.5 && \
+        mpv --no-video --no-audio-display ${TEMP_OUT_WAV_READ} && \
+        rm ${TEMP_OUT_WAV//.wav/}*
+done
