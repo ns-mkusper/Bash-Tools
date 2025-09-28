@@ -48,9 +48,15 @@ fi
 CLEAN_TITLE=$(echo "$ISSUE_TITLE" | tr '[:upper:]' '[:lower:]' | sed -e 's/[^a-z0-9]/-/g' -e 's/-\{2,\}/-/g' -e 's/^-//;s/-$//')
 BRANCH_NAME="$ISSUE_ID-$CLEAN_TITLE"
 
-# Checkout a new branch from 'main'
+# Ensure local 'main' is up to date before branching
+echo "Updating local 'main' branch..."
+git fetch origin main || error_exit "Failed to fetch 'main' from origin."
+git checkout main || error_exit "Unable to switch to 'main'. Please stash or commit your changes."
+git pull --ff-only origin main || error_exit "Failed to fast-forward 'main'. Resolve the issue and retry."
+
+# Checkout a new branch from the freshly updated 'main'
 echo "Checking out a new branch: $BRANCH_NAME from 'main'"
-git checkout -b "$BRANCH_NAME" main
+git checkout -b "$BRANCH_NAME" main || error_exit "Failed to create and switch to branch '$BRANCH_NAME'."
 
 # Push the new branch to the remote repository
 echo "Pushing new branch to remote repository..."
@@ -62,7 +68,7 @@ echo "Creating a new pull request for issue #$ISSUE_ID..."
 gh pr create \
   --base main \
   --title "solves issue #$ISSUE_ID: $ISSUE_TITLE" \
-  --body "This pull request addresses and solves issue #$ISSUE_ID. \n\n## Solves Issue \n\nsolves issue #$ISSUE_ID" \
+  --body "solves issue #$ISSUE_ID" \
   --web
 
 # Copy issue title and body to clipboard
