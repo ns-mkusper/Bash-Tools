@@ -1,26 +1,70 @@
 #!/bin/bash
 
-# Convert a text file to an mp3 using tts
+# Usage: ./tts_convert.sh input_file.[txt|md]
 
-INPUT_TXT=$1
-OUTPUT_WAV=${INPUT_TXT/txt/wav}
-OUTPUT_MP3=${INPUT_TXT/txt/mp3}
-OUTPUT_WAV_FAST=${INPUT_TXT/.txt/_fast.wav}
-OUTPUT_MP3_FAST=${INPUT_TXT/.txt/_fast.mp3}
-flite -f "${INPUT_TXT}" -o "$OUTPUT_WAV"    2>&1 > /dev/null
+INPUT_FILE="$1"
 
-# Speed up the audio
-sox "${OUTPUT_WAV}" "${OUTPUT_WAV_FAST}" tempo 1.5
+# 1. Check if file exists
+if [[ ! -f "$INPUT_FILE" ]]; then
+    echo "❌ Error: File '$INPUT_FILE' not found."
+    exit 1
+fi
 
-rm "$OUTPUT_WAV"
+# Determine Output Filename (Handle .txt or .md)
+BASENAME=$(basename "$INPUT_FILE")
+EXTENSION="${BASENAME##*.}"
+FILENAME="${BASENAME%.*}"
 
-echo "OUTPUT: $OUTPUT_MP3_FAST"
-# Convert wav to mp3
-ffmpeg -nostdin -loglevel  quiet -i "$OUTPUT_WAV_FAST"  -acodec libmp3lame -ar 44100 -ab 64000 -y "$OUTPUT_MP3_FAST"
+OUTPUT_WAV="/tmp/${FILENAME}.wav"
+OUTPUT_WAV_FAST="/tmp/${FILENAME}_fast.wav"
+OUTPUT_MP3="${FILENAME}_fast.mp3"
 
-rm "$OUTPUT_WAV_FAST"
+# Create a temporary file for the cleaned text
+CLEAN_TEXT=$(mktemp)
 
+echo "🧹 Pre-processing text (Removing formatting & fancy quotes)..."
 
-echo DONE!
+# 2. The "Augmented" Cleaning Logic
+# We use sed to strip Markdown and normalize punctuation before TTS reads it.
 
+# - Step A: Copy content to temp file
+cat "$INPUT_FILE" >"$CLEAN_TEXT"
 
+# - Step B: Simplify "Fancy" Punctuation (Smart Quotes, Dashes, Ellipsis)
+#   Replaces “ ” with " | ‘ ’ with ' | … with ... | — – with -
+sed -i "s/[“”]/\"/g; s/[‘’]/'/g; s/…/.../g; s/[—–]/-/g" "$CLEAN_TEXT"
+
+# - Step C: If Markdown, strip the syntax
+if [[ "$EXTENSION" == "md" ]]; then
+    echo "   (Markdown detected: stripping syntax tags)"
+    # Remove images ![alt](url)
+    sed -i -E 's/!\[[^]]*\]\([^)]*\)//g' "$CLEAN_TEXT"
+    # Remove links [text](url) -> keep only text
+    sed -i -E 's/\[([^]]*)\]\([^)]*\)/\1/g' "$CLEAN_TEXT"
+    # Remove bold/italic markers (**text** -> text)
+    sed -i -E 's/(\*\*|__)(.*)\1/\2/g' "$CLEAN_TEXT"
+    sed -i -E 's/(\*|_)(.*)\1/\2/g' "$CLEAN_TEXT"
+    # Remove Headers (# Chapter -> Chapter)
+    sed -i -E 's/^#+ //g' "$CLEAN_TEXT"
+    # Remove Blockquotes (> text -> text)
+    sed -i -E 's/^> //g' "$CLEAN_TEXT"
+    # Remove code blocks (```)
+    sed -i 's/```//g' "$CLEAN_TEXT"
+fi
+
+echo "🗣️  Generating audio with flite..."
+# 3. Generate Audio using the CLEAN text
+flite -f "$CLEAN_TEXT" -o "$OUTPUT_WAV"
+
+# 4. Speed up the audio
+echo "⏩ Speeding up audio (1.5x)..."
+sox "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" tempo 1.5
+
+# 5. Convert wav to mp3
+echo "🎵 Encoding to MP3..."
+ffmpeg -nostdin -loglevel quiet -i "$OUTPUT_WAV_FAST" -acodec libmp3lame -ar 44100 -ab 64000 -y "$OUTPUT_MP3"
+
+# 6. Cleanup
+rm "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" "$CLEAN_TEXT"
+
+echo "✅ DONE! Saved to: $OUTPUT_MP3"
