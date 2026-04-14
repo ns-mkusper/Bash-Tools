@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./txt2mp3-running input_file.[txt|md] [bpm]
+# Usage: ./txt2mp3-run input_file.[txt|md] [bpm]
 INPUT_FILE="$1"
 BPM="${2:-170}"
 
@@ -17,7 +17,6 @@ OUTPUT_WAV_FAST="/tmp/${FILENAME}_fast.wav"
 METRONOME_WAV="/tmp/metro.wav"
 CLEAN_TEXT=$(mktemp)
 
-# New naming convention
 OUTPUT_MP3="${FILENAME}_running_${BPM}bpm.mp3"
 
 echo "🧹 Pre-processing text..."
@@ -31,17 +30,18 @@ echo "⏩ Adjusting tempo (1.5x)..."
 sox "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" tempo 1.5
 
 echo "🥁 Building $BPM BPM pulse..."
-# Math for interval
 INTERVAL=$(echo "scale=5; 60 / $BPM" | bc)
 DURATION=$(soxi -D "$OUTPUT_WAV_FAST")
 
-# The simple, original beep logic that doesn't fail
-# We add a '0' before $INTERVAL to ensure it's 0.xxx format
-sox -n "$METRONOME_WAV" synth 0.05 sine 880 vol 0.3 pad 0 0$INTERVAL repeat 10000 trim 0 "$DURATION"
+# CHANGES HERE:
+# sine 100 = Low frequency thump (bass)
+# synth 0.03 = Shorter duration so it doesn't ring
+# vol 0.4 = Slightly higher vol to compensate for low pitch
+sox -n "$METRONOME_WAV" synth 0.03 sine 100 vol 0.4 pad 0 0$INTERVAL repeat 10000 trim 0 "$DURATION"
 
 echo "🎵 Mixing background track..."
 ffmpeg -nostdin -loglevel quiet -i "$OUTPUT_WAV_FAST" -i "$METRONOME_WAV" \
-    -filter_complex "[1:a]volume=0.1[metro];[0:a][metro]amix=inputs=2:duration=first" \
+    -filter_complex "[1:a]volume=0.15[metro];[0:a][metro]amix=inputs=2:duration=first" \
     -acodec libmp3lame -ar 44100 -ab 64000 -y "$OUTPUT_MP3"
 
 # Cleanup
