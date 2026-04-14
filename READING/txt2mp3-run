@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Usage: ./txt2mp3-run input_file.[txt|md]
+
+INPUT_FILE="$1"
+
+# 1. Check if file exists
+if [[ ! -f "$INPUT_FILE" ]]; then
+    echo "❌ Error: File '$INPUT_FILE' not found."
+    exit 1
+fi
+
+# Determine Output Filenames
+BASENAME=$(basename "$INPUT_FILE")
+EXTENSION="${BASENAME##*.}"
+FILENAME="${BASENAME%.*}"
+
+OUTPUT_WAV="/tmp/${FILENAME}.wav"
+OUTPUT_WAV_FAST="/tmp/${FILENAME}_fast.wav"
+METRONOME_WAV="/tmp/metro_170.wav"
+OUTPUT_MP3="${FILENAME}_170bpm.mp3"
+
+CLEAN_TEXT=$(mktemp)
+
+echo "🧹 Pre-processing text..."
+cat "$INPUT_FILE" >"$CLEAN_TEXT"
+sed -i "s/[“”]/\"/g; s/[‘’]/'/g; s/…/.../g; s/[—–]/-/g" "$CLEAN_TEXT"
+
+if [[ "$EXTENSION" == "md" ]]; then
+    echo "   (Markdown detected: stripping syntax tags)"
+    sed -i -E 's/!\[[^]]*\]\([^)]*\)//g' "$CLEAN_TEXT"
+    sed -i -E 's/\[([^]]*)\]\([^)]*\)/\1/g' "$CLEAN_TEXT"
+    sed -i -E 's/(\*\*|__)(.*)\1/\2/g' "$CLEAN_TEXT"
+    sed -i -E 's/(\*|_)(.*)\1/\2/g' "$CLEAN_TEXT"
+    sed -i -E 's/^#+ //g' "$CLEAN_TEXT"
+    sed -i -E 's/^> //g' "$CLEAN_TEXT"
+    sed -i 's/```//g' "$CLEAN_TEXT"
+fi
+
+echo "🗣️  Generating audio with flite..."
+flite -f "$CLEAN_TEXT" -o "$OUTPUT_WAV"
+
+echo "⏩ Speeding up audio (1.5x)..."
+sox "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" tempo 1.5
+
+# 2. Generate 170 BPM Metronome Track
+# Math: 60 seconds / 170 BPM = ~0.35294 seconds per beat
+echo "🥁 Generating 170 BPM background pulse..."
+DURATION=$(soxi -D "$OUTPUT_WAV_FAST")
+sox -n "$METRONOME_WAV" synth 0.03 pinknoise hp 800 vol 0.2 pad 0 0.32294 repeat 10000 trim 0 "$DURATION"
+
+# 3. Mix Voice + Metronome
+echo "🎵 Mixing and Encoding to MP3..."
+# volume=0.15 keeps the metronome "kinda quiet" in the background
+ffmpeg -nostdin -loglevel quiet -i "$OUTPUT_WAV_FAST" -i "$METRONOME_WAV" \
+    -filter_complex "[1:a]volume=0.15[metro];[0:a][metro]amix=inputs=2:duration=first" \
+    -acodec libmp3lame -ar 44100 -ab 64000 -y "$OUTPUT_MP3"
+
+# 4. Cleanup
+rm "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" "$METRONOME_WAV" "$CLEAN_TEXT"
+
+echo "✅ DONE! Created: $OUTPUT_MP3"
