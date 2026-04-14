@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Usage: ./txt2mp3-run input_file.[txt|md] [bpm]
+# Usage: ./txt2mp3-running input_file.[txt|md] [bpm]
 INPUT_FILE="$1"
 BPM="${2:-170}"
 
@@ -33,15 +33,14 @@ echo "🥁 Building $BPM BPM pulse..."
 INTERVAL=$(echo "scale=5; 60 / $BPM" | bc)
 DURATION=$(soxi -D "$OUTPUT_WAV_FAST")
 
-# CHANGES HERE:
-# sine 100 = Low frequency thump (bass)
-# synth 0.03 = Shorter duration so it doesn't ring
-# vol 0.4 = Slightly higher vol to compensate for low pitch
-sox -n "$METRONOME_WAV" synth 0.03 sine 100 vol 0.4 pad 0 0$INTERVAL repeat 10000 trim 0 "$DURATION"
+# 500Hz is a very standard "solid" beep.
+# vol 0.8 is high-gain generation.
+sox -n "$METRONOME_WAV" synth 0.05 sine 500 vol 0.8 pad 0 0$INTERVAL repeat 10000 trim 0 "$DURATION"
 
 echo "🎵 Mixing background track..."
+# volume=0.5 puts the metronome at half-strength relative to the voice.
 ffmpeg -nostdin -loglevel quiet -i "$OUTPUT_WAV_FAST" -i "$METRONOME_WAV" \
-    -filter_complex "[1:a]volume=0.15[metro];[0:a][metro]amix=inputs=2:duration=first" \
+    -filter_complex "[1:a]volume=0.5[metro];[0:a][metro]amix=inputs=2:duration=first" \
     -acodec libmp3lame -ar 44100 -ab 64000 -y "$OUTPUT_MP3"
 
 # Cleanup
