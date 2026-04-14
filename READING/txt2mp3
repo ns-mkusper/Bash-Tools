@@ -1,70 +1,115 @@
 #!/bin/bash
 
-# Usage: ./tts_convert.sh input_file.[txt|md]
+# Usage Examples:
+# 1. Standard Mode (Default): Speed up text to 1.5x with no metronome.
+#    ./txt2mp3 book.txt
+#
+# 2. Running Mode: 45s of voice followed by 45s of 170bpm metronome.
+#    ./txt2mp3 -r book.txt
+#
+# 3. Custom Running Mode: 60s of voice, 30s of 180bpm metronome.
+#    ./txt2mp3 -r -b 180 -v 60 -m 30 book.txt
+
+# Default values
+BPM=170
+VOICE_SEC=45
+METRO_SEC=45
+RUN_MODE=false
+
+usage() {
+    echo "Usage: $0 [options] input_file.[txt|md]"
+    echo ""
+    echo "Options:"
+    echo "  -r               Enable running interval mode (alternating blocks)"
+    echo "  -b BPM           Metronome BPM (default: 170)"
+    echo "  -v SECONDS       Voice block duration (default: 45)"
+    echo "  -m SECONDS       Metronome block duration (default: 45)"
+    echo "  -h               Show this help"
+    exit 1
+}
+
+# Parse flags
+while getopts "rb:v:m:h" opt; do
+    case "$opt" in
+        r) RUN_MODE=true ;;
+        b) BPM=$OPTARG ;;
+        v) VOICE_SEC=$OPTARG ;;
+        m) METRO_SEC=$OPTARG ;;
+        h) usage ;;
+        *) usage ;;
+    esac
+done
+shift $((OPTIND-1))
 
 INPUT_FILE="$1"
 
-# 1. Check if file exists
 if [[ ! -f "$INPUT_FILE" ]]; then
     echo "❌ Error: File '$INPUT_FILE' not found."
-    exit 1
+    usage
 fi
 
-# Determine Output Filename (Handle .txt or .md)
+# Setup
 BASENAME=$(basename "$INPUT_FILE")
-EXTENSION="${BASENAME##*.}"
 FILENAME="${BASENAME%.*}"
+TEMP_DIR=$(mktemp -d)
+CLEAN_TEXT="$TEMP_DIR/clean.txt"
+LIST_FILE="$TEMP_DIR/concat_list.txt"
 
-OUTPUT_WAV="/tmp/${FILENAME}.wav"
-OUTPUT_WAV_FAST="/tmp/${FILENAME}_fast.wav"
-OUTPUT_MP3="${FILENAME}_fast.mp3"
-
-# Create a temporary file for the cleaned text
-CLEAN_TEXT=$(mktemp)
-
-echo "🧹 Pre-processing text (Removing formatting & fancy quotes)..."
-
-# 2. The "Augmented" Cleaning Logic
-# We use sed to strip Markdown and normalize punctuation before TTS reads it.
-
-# - Step A: Copy content to temp file
-cat "$INPUT_FILE" >"$CLEAN_TEXT"
-
-# - Step B: Simplify "Fancy" Punctuation (Smart Quotes, Dashes, Ellipsis)
-#   Replaces “ ” with " | ‘ ’ with ' | … with ... | — – with -
-sed -i "s/[“”]/\"/g; s/[‘’]/'/g; s/…/.../g; s/[—–]/-/g" "$CLEAN_TEXT"
-
-# - Step C: If Markdown, strip the syntax
-if [[ "$EXTENSION" == "md" ]]; then
-    echo "   (Markdown detected: stripping syntax tags)"
-    # Remove images ![alt](url)
-    sed -i -E 's/!\[[^]]*\]\([^)]*\)//g' "$CLEAN_TEXT"
-    # Remove links [text](url) -> keep only text
-    sed -i -E 's/\[([^]]*)\]\([^)]*\)/\1/g' "$CLEAN_TEXT"
-    # Remove bold/italic markers (**text** -> text)
-    sed -i -E 's/(\*\*|__)(.*)\1/\2/g' "$CLEAN_TEXT"
-    sed -i -E 's/(\*|_)(.*)\1/\2/g' "$CLEAN_TEXT"
-    # Remove Headers (# Chapter -> Chapter)
-    sed -i -E 's/^#+ //g' "$CLEAN_TEXT"
-    # Remove Blockquotes (> text -> text)
-    sed -i -E 's/^> //g' "$CLEAN_TEXT"
-    # Remove code blocks (```)
-    sed -i 's/```//g' "$CLEAN_TEXT"
+if [ "$RUN_MODE" = true ]; then
+    OUTPUT_MP3="${FILENAME}_run_${VOICE_SEC}v_${METRO_SEC}m_${BPM}bpm.mp3"
+else
+    OUTPUT_MP3="${FILENAME}_standard.mp3"
 fi
 
-echo "🗣️  Generating audio with flite..."
-# 3. Generate Audio using the CLEAN text
-flite -f "$CLEAN_TEXT" -o "$OUTPUT_WAV"
+echo "🧹 Pre-processing text..."
+# Standardize quotes/dashes and strip non-ASCII to prevent flite errors
+sed "s/[“”]/\"/g; s/[‘’]/'/g; s/…/.../g; s/[—–]/-/g" "$INPUT_FILE" | tr -cd '\11\12\15\40-\176' > "$CLEAN_TEXT"
+# Split into sentences
+sed -i -E 's/([.!?])\s+/\1\n/g' "$CLEAN_TEXT"
 
-# 4. Speed up the audio
-echo "⏩ Speeding up audio (1.5x)..."
-sox "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" tempo 1.5
+if [ "$RUN_MODE" = true ]; then
+    echo "🥁 Generating ${METRO_SEC}s Metronome Block ($BPM BPM)..."
+    METRO_STD="$TEMP_DIR/metro_std.wav"
+    INTERVAL=$(echo "scale=5; 60 / $BPM" | bc)
+    sox -n "$TEMP_DIR/m.wav" synth 0.05 sine 1000 vol 0.8 pad 0 0$INTERVAL repeat 2000 trim 0 "$METRO_SEC"
+    ffmpeg -loglevel quiet -i "$TEMP_DIR/m.wav" -ar 44100 -ac 1 -c:a pcm_s16le "$METRO_STD"
+fi
 
-# 5. Convert wav to mp3
-echo "🎵 Encoding to MP3..."
-ffmpeg -nostdin -loglevel quiet -i "$OUTPUT_WAV_FAST" -acodec libmp3lame -ar 44100 -ab 64000 -y "$OUTPUT_MP3"
+echo "🗣️  Synthesizing..."
+CURRENT_BLOCK_DURATION=0
+CHUNK_COUNT=0
 
-# 6. Cleanup
-rm "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" "$CLEAN_TEXT"
+while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
 
-echo "✅ DONE! Saved to: $OUTPUT_MP3"
+    SENTENCE_STD="$TEMP_DIR/std_${CHUNK_COUNT}.wav"
+
+    # Process: TTS -> Speed (1.5x) -> Standardize format (44.1k Mono)
+    flite -t "$line" -o "$TEMP_DIR/tmp.wav"
+    sox "$TEMP_DIR/tmp.wav" "$TEMP_DIR/fast.wav" tempo 1.5
+    ffmpeg -loglevel quiet -y -i "$TEMP_DIR/fast.wav" -ar 44100 -ac 1 -c:a pcm_s16le "$SENTENCE_STD"
+
+    if [[ -f "$SENTENCE_STD" ]]; then
+        echo "file '$SENTENCE_STD'" >> "$LIST_FILE"
+
+        if [ "$RUN_MODE" = true ]; then
+            DUR=$(soxi -D "$SENTENCE_STD")
+            CURRENT_BLOCK_DURATION=$(echo "$CURRENT_BLOCK_DURATION + $DUR" | bc)
+
+            # If we've hit the voice time threshold, append the metronome block
+            if (( $(echo "$CURRENT_BLOCK_DURATION >= $VOICE_SEC" | bc -l) )); then
+                echo "file '$METRO_STD'" >> "$LIST_FILE"
+                CURRENT_BLOCK_DURATION=0
+            fi
+        fi
+    fi
+    ((CHUNK_COUNT++))
+done < "$CLEAN_TEXT"
+
+echo "🎵 Stitching final MP3..."
+# -fflags +genpts ensures clean timestamps for the concatenated file
+ffmpeg -f concat -safe 0 -i "$LIST_FILE" -fflags +genpts -acodec libmp3lame -ar 44100 -ab 64k -y "$OUTPUT_MP3"
+
+# Cleanup
+rm -rf "$TEMP_DIR"
+echo "✅ DONE! Created: $OUTPUT_MP3"
