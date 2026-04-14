@@ -9,22 +9,26 @@ if [[ ! -f "$INPUT_FILE" ]]; then
     exit 1
 fi
 
+# Ensure bc is installed
+if ! command -v bc &> /dev/null; then
+    echo "❌ Error: 'bc' is not installed. Install it with 'sudo apt install bc' or 'brew install bc'"
+    exit 1
+fi
+
 BASENAME=$(basename "$INPUT_FILE")
 FILENAME="${BASENAME%.*}"
 
-# Temporary files
 OUTPUT_WAV="/tmp/${FILENAME}_raw.wav"
 OUTPUT_WAV_FAST="/tmp/${FILENAME}_fast.wav"
 METRONOME_WAV="/tmp/metro_${BPM}.wav"
+SINGLE_CLICK="/tmp/click.wav"
 CLEAN_TEXT=$(mktemp)
 
 OUTPUT_MP3="${FILENAME}_running_${BPM}bpm.mp3"
 
 echo "🧹 Pre-processing: $BASENAME"
-# Step A: Normalize punctuation
-sed "s/[“”]/\"/g; s/[‘’]/'/g; s/…/.../g; s/[—–]/-/g" "$INPUT_FILE" > "$CLEAN_TEXT"
-# Step B: STRIP non-ASCII characters that confuse flite
-tr -cd '\11\12\15\40-\176' < "$CLEAN_TEXT" > "${CLEAN_TEXT}.tmp" && mv "${CLEAN_TEXT}.tmp" "$CLEAN_TEXT"
+# Strip non-ASCII and clean up punctuation
+sed "s/[“”]/\"/g; s/[‘’]/'/g; s/…/.../g; s/[—–]/-/g" "$INPUT_FILE" | tr -cd '\11\12\15\40-\176' > "$CLEAN_TEXT"
 
 echo "🗣️  Synthesizing voice..."
 flite -f "$CLEAN_TEXT" -o "$OUTPUT_WAV"
@@ -33,24 +37,25 @@ echo "⏩ Adjusting tempo (1.5x)..."
 sox "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" tempo 1.5
 
 echo "🥁 Building ${BPM} BPM pulse..."
-# Ensure BC is used for precise math
+# Precise math for the interval
 BEAT_INTERVAL=$(echo "scale=5; 60 / $BPM" | bc)
-PAD_TIME=$(echo "scale=5; $BEAT_INTERVAL - 0.02" | bc)
 DURATION=$(soxi -D "$OUTPUT_WAV_FAST")
 
-# Generate metronome - Added '0' before decimal to prevent sox freq errors
-sox -n "$METRONOME_WAV" synth 0.02 pinknoise hp 1200 vol 0.25 pad 0 0"$PAD_TIME" repeat 10000 trim 0 "$DURATION"
+# 1. Create a single click
+# 2. Pad it to the exact beat length
+# 3. Repeat to match the duration of the voice
+sox -n "$SINGLE_CLICK" synth 0.02 pinknoise hp 1200 vol 0.25
+sox "$SINGLE_CLICK" "$METRONOME_WAV" pad 0 "$BEAT_INTERVAL" repeat 10000 trim 0 "$DURATION"
 
 echo "🎵 Mixing background track..."
 if [[ -f "$METRONOME_WAV" && -f "$OUTPUT_WAV_FAST" ]]; then
     ffmpeg -nostdin -loglevel quiet -i "$OUTPUT_WAV_FAST" -i "$METRONOME_WAV" \
         -filter_complex "[1:a]volume=0.12[metro];[0:a][metro]amix=inputs=2:duration=first" \
         -acodec libmp3lame -ar 44100 -ab 64000 -y "$OUTPUT_MP3"
+    echo "✅ SUCCESS! Saved to: $OUTPUT_MP3"
 else
-    echo "❌ Error: Audio components missing. Check sox/flite output."
+    echo "❌ Error: Metronome or Voice file failed to generate."
 fi
 
 # Cleanup
-rm -f "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" "$METRONOME_WAV" "$CLEAN_TEXT"
-
-echo "✅ DONE! Created: $OUTPUT_MP3"
+rm -f "$OUTPUT_WAV" "$OUTPUT_WAV_FAST" "$METRONOME_WAV" "$SINGLE_CLICK" "$CLEAN_TEXT"
