@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -u
+
 # Usage Examples:
 # 1. Standard Mode (Default): Speed up text to 1.5x with no metronome.
 #    ./txt2mp3 book.txt
@@ -28,6 +30,88 @@ usage() {
     exit 1
 }
 
+require_cmd() {
+    if ! command -v "$1" >/dev/null 2>&1; then
+        echo "❌ Error: Required command not found: $1"
+        exit 1
+    fi
+}
+
+add_concat_file() {
+    local p="$1"
+    SEGMENT_FILES+=("$p")
+}
+
+synthesize_sentence() {
+    local text="$1"
+    local out_wav="$2"
+    local textfile="$TEMP_DIR/flite_input_${CHUNK_COUNT}.txt"
+    # flite's text parser can misinterpret some leading tokens as commands.
+    # Prefixing a space keeps input in plain-text mode.
+    printf ' %s\n' "$text" > "$textfile"
+
+    if [ "$HAS_FLITE_BIN" = true ]; then
+        # Use file input instead of -t to avoid command-parser edge cases on long/special lines.
+        flite -f "$textfile" -o "$out_wav"
+        return $?
+    fi
+
+    # Fallback when flite CLI is unavailable: use ffmpeg's libflite audio source.
+    ffmpeg -nostdin -hide_banner -loglevel error -y -f lavfi -i "flite=textfile='$textfile':voice=slt" -c:a pcm_s16le "$out_wav"
+}
+
+concat_wavs_batched() {
+    local out_wav="$1"
+    local fd_soft_limit
+    fd_soft_limit=$(ulimit -n 2>/dev/null || echo 256)
+    local batch_size=120
+    # Keep headroom for process + shared libs + other open descriptors.
+    if [[ "$fd_soft_limit" =~ ^[0-9]+$ ]] && [ "$fd_soft_limit" -gt 32 ]; then
+        batch_size=$((fd_soft_limit - 40))
+        if [ "$batch_size" -lt 16 ]; then
+            batch_size=16
+        elif [ "$batch_size" -gt 120 ]; then
+            batch_size=120
+        fi
+    fi
+    local batch_id=0
+    local -a batch=()
+    local -a partials=()
+    local p=""
+
+    for p in "${SEGMENT_FILES[@]}"; do
+        batch+=("$p")
+        if [ "${#batch[@]}" -ge "$batch_size" ]; then
+            local part="$TEMP_DIR/stitch_part_${batch_id}.wav"
+            if ! sox "${batch[@]}" "$part"; then
+                return 1
+            fi
+            partials+=("$part")
+            batch=()
+            ((batch_id++))
+        fi
+    done
+
+    if [ "${#batch[@]}" -gt 0 ]; then
+        local part="$TEMP_DIR/stitch_part_${batch_id}.wav"
+        if ! sox "${batch[@]}" "$part"; then
+            return 1
+        fi
+        partials+=("$part")
+    fi
+
+    if [ "${#partials[@]}" -eq 0 ]; then
+        return 1
+    fi
+
+    # Merge batch outputs. This second pass is small enough to avoid FD limits.
+    if [ "${#partials[@]}" -eq 1 ]; then
+        cp "${partials[0]}" "$out_wav"
+    else
+        sox "${partials[@]}" "$out_wav"
+    fi
+}
+
 # Parse flags
 while getopts "rb:v:m:h" opt; do
     case "$opt" in
@@ -48,12 +132,26 @@ if [[ ! -f "$INPUT_FILE" ]]; then
     usage
 fi
 
+require_cmd sox
+require_cmd ffmpeg
+require_cmd sed
+require_cmd tr
+require_cmd bc
+
+if command -v flite >/dev/null 2>&1 && [[ "${TXT2MP3_FORCE_FFMPEG_FLITE:-0}" != "1" ]]; then
+    HAS_FLITE_BIN=true
+else
+    HAS_FLITE_BIN=false
+    echo "ℹ️  Using ffmpeg libflite voice synthesis fallback (set TXT2MP3_FORCE_FFMPEG_FLITE=1 to force it)."
+fi
+
 # Setup
 BASENAME=$(basename "$INPUT_FILE")
 FILENAME="${BASENAME%.*}"
 TEMP_DIR=$(mktemp -d)
 CLEAN_TEXT="$TEMP_DIR/clean.txt"
 LIST_FILE="$TEMP_DIR/concat_list.txt"
+SEGMENT_FILES=()
 
 if [ "$RUN_MODE" = true ]; then
     OUTPUT_MP3="${FILENAME}_run_${VOICE_SEC}v_${METRO_SEC}m_${BPM}bpm.mp3"
@@ -72,25 +170,41 @@ if [ "$RUN_MODE" = true ]; then
     METRO_STD="$TEMP_DIR/metro_std.wav"
     INTERVAL=$(echo "scale=5; 60 / $BPM" | bc)
     sox -n "$TEMP_DIR/m.wav" synth 0.05 sine 1000 vol 0.8 pad 0 0$INTERVAL repeat 2000 trim 0 "$METRO_SEC"
-    ffmpeg -loglevel quiet -i "$TEMP_DIR/m.wav" -ar 44100 -ac 1 -c:a pcm_s16le "$METRO_STD"
+    ffmpeg -nostdin -loglevel quiet -i "$TEMP_DIR/m.wav" -ar 44100 -ac 1 -c:a pcm_s16le "$METRO_STD"
 fi
 
 echo "🗣️  Synthesizing..."
 CURRENT_BLOCK_DURATION=0
 CHUNK_COUNT=0
+SEGMENT_COUNT=0
 
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
 
     SENTENCE_STD="$TEMP_DIR/std_${CHUNK_COUNT}.wav"
+    TMP_WAV="$TEMP_DIR/tmp_${CHUNK_COUNT}.wav"
+    FAST_WAV="$TEMP_DIR/fast_${CHUNK_COUNT}.wav"
 
     # Process: TTS -> Speed (1.5x) -> Standardize format (44.1k Mono)
-    flite -t "$line" -o "$TEMP_DIR/tmp.wav"
-    sox "$TEMP_DIR/tmp.wav" "$TEMP_DIR/fast.wav" tempo 1.5
-    ffmpeg -loglevel quiet -y -i "$TEMP_DIR/fast.wav" -ar 44100 -ac 1 -c:a pcm_s16le "$SENTENCE_STD"
+    if ! synthesize_sentence "$line" "$TMP_WAV"; then
+        echo "⚠️  Skipping sentence $CHUNK_COUNT: flite synthesis failed."
+        ((CHUNK_COUNT++))
+        continue
+    fi
+    if ! sox "$TMP_WAV" "$FAST_WAV" tempo 1.5; then
+        echo "⚠️  Skipping sentence $CHUNK_COUNT: sox tempo transform failed."
+        ((CHUNK_COUNT++))
+        continue
+    fi
+    if ! ffmpeg -nostdin -loglevel error -y -i "$FAST_WAV" -ar 44100 -ac 1 -c:a pcm_s16le "$SENTENCE_STD"; then
+        echo "⚠️  Skipping sentence $CHUNK_COUNT: ffmpeg WAV standardization failed."
+        ((CHUNK_COUNT++))
+        continue
+    fi
 
     if [[ -f "$SENTENCE_STD" ]]; then
-        echo "file '$SENTENCE_STD'" >> "$LIST_FILE"
+        add_concat_file "$SENTENCE_STD"
+        ((SEGMENT_COUNT++))
 
         if [ "$RUN_MODE" = true ]; then
             DUR=$(soxi -D "$SENTENCE_STD")
@@ -98,7 +212,8 @@ while IFS= read -r line; do
 
             # If we've hit the voice time threshold, append the metronome block
             if (( $(echo "$CURRENT_BLOCK_DURATION >= $VOICE_SEC" | bc -l) )); then
-                echo "file '$METRO_STD'" >> "$LIST_FILE"
+                add_concat_file "$METRO_STD"
+                ((SEGMENT_COUNT++))
                 CURRENT_BLOCK_DURATION=0
             fi
         fi
@@ -106,9 +221,26 @@ while IFS= read -r line; do
     ((CHUNK_COUNT++))
 done < "$CLEAN_TEXT"
 
+if [[ "$SEGMENT_COUNT" -eq 0 ]]; then
+    echo "❌ Error: No audio segments were generated. Check flite/sox errors above."
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
 echo "🎵 Stitching final MP3..."
-# -fflags +genpts ensures clean timestamps for the concatenated file
-ffmpeg -f concat -safe 0 -i "$LIST_FILE" -fflags +genpts -acodec libmp3lame -ar 44100 -ab 64k -y "$OUTPUT_MP3"
+# Stage 1: concatenate in batches to avoid hitting open-file limits on long books.
+STITCHED_WAV="$TEMP_DIR/stitched.wav"
+if ! concat_wavs_batched "$STITCHED_WAV"; then
+    echo "❌ Error: Failed while stitching WAV segments."
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+# Stage 2: encode MP3 from the normalized WAV.
+if ! ffmpeg -nostdin -loglevel warning -i "$STITCHED_WAV" -acodec libmp3lame -ar 44100 -ab 64k -y "$OUTPUT_MP3"; then
+    echo "❌ Error: Failed while encoding final MP3."
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
 
 # Cleanup
 rm -rf "$TEMP_DIR"
