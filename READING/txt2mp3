@@ -17,6 +17,7 @@ BPM=170
 VOICE_SEC=45
 METRO_SEC=45
 RUN_MODE=false
+DEBUG_MODE=false
 
 usage() {
     echo "Usage: $0 [options] input_file.[txt|md]"
@@ -24,8 +25,9 @@ usage() {
     echo "Options:"
     echo "  -r               Enable running interval mode (alternating blocks)"
     echo "  -b BPM           Metronome BPM (default: 170)"
-    echo "  -v SECONDS       Voice block duration (default: 45)"
-    echo "  -m SECONDS       Metronome block duration (default: 45)"
+    echo "  -v SECONDS       Voice block duration in running mode (default: 45)"
+    echo "  -m SECONDS       Metronome block duration in running mode (default: 45)"
+    echo "  -d               Enable debug summary and keep temp working files"
     echo "  -h               Show this help"
     exit 1
 }
@@ -52,7 +54,7 @@ synthesize_sentence() {
 
     if [ "$HAS_FLITE_BIN" = true ]; then
         # Use file input instead of -t to avoid command-parser edge cases on long/special lines.
-        flite -f "$textfile" -o "$out_wav"
+        flite -f "$textfile" -o "$out_wav" </dev/null
         return $?
     fi
 
@@ -106,15 +108,17 @@ concat_wavs_batched() {
 
     # Merge batch outputs. This second pass is small enough to avoid FD limits.
     if [ "${#partials[@]}" -eq 1 ]; then
-        cp "${partials[0]}" "$out_wav"
+        # Re-encode to target container so large outputs can use a 64-bit header.
+        sox "${partials[0]}" "$out_wav"
     else
         sox "${partials[@]}" "$out_wav"
     fi
 }
 
 # Parse flags
-while getopts "rb:v:m:h" opt; do
+while getopts "drb:v:m:h" opt; do
     case "$opt" in
+        d) DEBUG_MODE=true ;;
         r) RUN_MODE=true ;;
         b) BPM=$OPTARG ;;
         v) VOICE_SEC=$OPTARG ;;
@@ -134,15 +138,21 @@ fi
 
 require_cmd sox
 require_cmd ffmpeg
+require_cmd ffprobe
 require_cmd sed
 require_cmd tr
 require_cmd bc
 
+# Default to flite CLI voice when available; allow forcing ffmpeg libflite fallback.
 if command -v flite >/dev/null 2>&1 && [[ "${TXT2MP3_FORCE_FFMPEG_FLITE:-0}" != "1" ]]; then
     HAS_FLITE_BIN=true
 else
     HAS_FLITE_BIN=false
-    echo "ℹ️  Using ffmpeg libflite voice synthesis fallback (set TXT2MP3_FORCE_FFMPEG_FLITE=1 to force it)."
+    if command -v flite >/dev/null 2>&1; then
+        echo "ℹ️  Using ffmpeg libflite voice synthesis fallback (set TXT2MP3_FORCE_FFMPEG_FLITE=1 to force it)."
+    else
+        echo "ℹ️  Using ffmpeg libflite voice synthesis fallback (flite CLI not found)."
+    fi
 fi
 
 # Setup
@@ -177,9 +187,14 @@ echo "🗣️  Synthesizing..."
 CURRENT_BLOCK_DURATION=0
 CHUNK_COUNT=0
 SEGMENT_COUNT=0
+READ_NONEMPTY_COUNT=0
+VOICE_SEGMENT_COUNT=0
+VOICE_DURATION_TOTAL=0
+METRO_INSERT_COUNT=0
 
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
+    ((READ_NONEMPTY_COUNT++))
 
     SENTENCE_STD="$TEMP_DIR/std_${CHUNK_COUNT}.wav"
     TMP_WAV="$TEMP_DIR/tmp_${CHUNK_COUNT}.wav"
@@ -205,17 +220,23 @@ while IFS= read -r line; do
     if [[ -f "$SENTENCE_STD" ]]; then
         add_concat_file "$SENTENCE_STD"
         ((SEGMENT_COUNT++))
+        ((VOICE_SEGMENT_COUNT++))
 
         if [ "$RUN_MODE" = true ]; then
             DUR=$(soxi -D "$SENTENCE_STD")
             CURRENT_BLOCK_DURATION=$(echo "$CURRENT_BLOCK_DURATION + $DUR" | bc)
+            VOICE_DURATION_TOTAL=$(echo "$VOICE_DURATION_TOTAL + $DUR" | bc)
 
             # If we've hit the voice time threshold, append the metronome block
             if (( $(echo "$CURRENT_BLOCK_DURATION >= $VOICE_SEC" | bc -l) )); then
                 add_concat_file "$METRO_STD"
                 ((SEGMENT_COUNT++))
+                ((METRO_INSERT_COUNT++))
                 CURRENT_BLOCK_DURATION=0
             fi
+        else
+            DUR=$(soxi -D "$SENTENCE_STD")
+            VOICE_DURATION_TOTAL=$(echo "$VOICE_DURATION_TOTAL + $DUR" | bc)
         fi
     fi
     ((CHUNK_COUNT++))
@@ -227,21 +248,77 @@ if [[ "$SEGMENT_COUNT" -eq 0 ]]; then
     exit 1
 fi
 
+SKIPPED_COUNT=$((READ_NONEMPTY_COUNT - VOICE_SEGMENT_COUNT))
+if [ "$SKIPPED_COUNT" -gt 0 ] && [[ "${TXT2MP3_ALLOW_SKIPS:-0}" != "1" ]]; then
+    echo "❌ Error: $SKIPPED_COUNT line(s) failed synthesis/transform."
+    echo "   Rerun with -d for details, or set TXT2MP3_ALLOW_SKIPS=1 to allow partial output."
+    echo "   Temp files kept at: $TEMP_DIR"
+    exit 1
+fi
+
 echo "🎵 Stitching final MP3..."
 # Stage 1: concatenate in batches to avoid hitting open-file limits on long books.
-STITCHED_WAV="$TEMP_DIR/stitched.wav"
-if ! concat_wavs_batched "$STITCHED_WAV"; then
+# Use W64 here because long sessions can exceed WAV's 4GB header limit.
+STITCHED_AUDIO="$TEMP_DIR/stitched.w64"
+if ! concat_wavs_batched "$STITCHED_AUDIO"; then
     echo "❌ Error: Failed while stitching WAV segments."
     rm -rf "$TEMP_DIR"
     exit 1
 fi
-# Stage 2: encode MP3 from the normalized WAV.
-if ! ffmpeg -nostdin -loglevel warning -i "$STITCHED_WAV" -acodec libmp3lame -ar 44100 -ab 64k -y "$OUTPUT_MP3"; then
+# Stage 2: encode MP3 from the normalized stitched audio.
+if ! ffmpeg -nostdin -loglevel warning -i "$STITCHED_AUDIO" -acodec libmp3lame -ar 44100 -ab 64k -y "$OUTPUT_MP3"; then
     echo "❌ Error: Failed while encoding final MP3."
     rm -rf "$TEMP_DIR"
     exit 1
 fi
 
+FINAL_DURATION=$(ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "$OUTPUT_MP3")
+if [[ -z "$FINAL_DURATION" ]]; then
+    echo "❌ Error: Could not measure output duration with ffprobe."
+    rm -rf "$TEMP_DIR"
+    exit 1
+fi
+
+EXPECTED_TOTAL="$VOICE_DURATION_TOTAL"
+if [ "$RUN_MODE" = true ] && [ "$METRO_INSERT_COUNT" -gt 0 ]; then
+    EXPECTED_TOTAL=$(echo "$VOICE_DURATION_TOTAL + ($METRO_INSERT_COUNT * $METRO_SEC)" | bc -l)
+fi
+
+# Test-only hook to validate failure path in automated checks.
+if [[ "${TXT2MP3_TEST_FORCE_DURATION_FAIL:-0}" = "1" ]]; then
+    FINAL_DURATION=0
+fi
+
+# Fail if output is materially shorter than the generated segment total.
+ALLOWED_SHORTFALL=$(echo "$EXPECTED_TOTAL * 0.01" | bc -l)
+if (( $(echo "$ALLOWED_SHORTFALL > 30" | bc -l) )); then
+    ALLOWED_SHORTFALL=30
+fi
+if (( $(echo "$ALLOWED_SHORTFALL < 1" | bc -l) )); then
+    ALLOWED_SHORTFALL=1
+fi
+MIN_ACCEPTED_DURATION=$(echo "$EXPECTED_TOTAL - $ALLOWED_SHORTFALL" | bc -l)
+
+if (( $(echo "$FINAL_DURATION < $MIN_ACCEPTED_DURATION" | bc -l) )); then
+    echo "❌ Error: Output appears truncated."
+    echo "   Expected at least ${MIN_ACCEPTED_DURATION}s (from generated segments), got ${FINAL_DURATION}s."
+    echo "   Temp files kept at: $TEMP_DIR"
+    exit 1
+fi
+
+if [ "$DEBUG_MODE" = true ]; then
+    echo "🐞 Debug Summary:"
+    echo "   Non-empty lines read: $READ_NONEMPTY_COUNT"
+    echo "   Voice segments synthesized: $VOICE_SEGMENT_COUNT"
+    echo "   Voice segments skipped: $SKIPPED_COUNT"
+    echo "   Metronome inserts: $METRO_INSERT_COUNT"
+    echo "   Expected audio (s): $EXPECTED_TOTAL"
+    echo "   Final MP3 duration (s): $FINAL_DURATION"
+    echo "   Temp files kept at: $TEMP_DIR"
+fi
+
 # Cleanup
-rm -rf "$TEMP_DIR"
+if [ "$DEBUG_MODE" != true ]; then
+    rm -rf "$TEMP_DIR"
+fi
 echo "✅ DONE! Created: $OUTPUT_MP3"
