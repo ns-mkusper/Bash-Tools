@@ -1,0 +1,92 @@
+#!/bin/bash
+
+# Usage: ./inject_dind.sh [-s|--suffix <suffix>] [container_name_or_id]
+
+SUFFIX=""
+CONTAINER_ARG=""
+
+# Parse command-line arguments using standard POSIX brackets
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        -s|--suffix)
+            SUFFIX="$2"
+            shift 2
+            ;;
+        *)
+            CONTAINER_ARG="$1"
+            shift 1
+            ;;
+    esac
+done
+
+# If a suffix is provided but doesn't start with a dash, add one automatically
+case "$SUFFIX" in
+    -*) ;; # Starts with a dash, do nothing
+    "") ;; # Is empty, do nothing
+    *) SUFFIX="-$SUFFIX" ;; # Doesn't start with a dash, add one
+esac
+
+PROJECT_NAME=$(basename "$(pwd)")
+DEFAULT_NAME="codex-${PROJECT_NAME}${SUFFIX}"
+
+# Use the specific container arg if provided, otherwise fall back to the default + suffix
+CONTAINER=${CONTAINER_ARG:-$DEFAULT_NAME}
+
+echo "💉 Injecting Docker, Compose, and remote tooling into '$CONTAINER'..."
+
+# 1. Check Docker socket
+if ! docker exec "$CONTAINER" ls /var/run/docker.sock >/dev/null 2>&1; then
+    echo "❌ Error: /var/run/docker.sock is NOT mounted."
+    exit 1
+fi
+
+# 2. Install Docker CLI & Compose Plugin + SSH, ping, rsync (Debian/Ubuntu)
+echo "📦 Installing Docker CLI, Compose, SSH, ping, rsync..."
+docker exec -u root "$CONTAINER" bash -c '
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update && \
+    apt-get install -y ca-certificates curl apt-transport-https gnupg iputils-ping rsync openssh-client
+
+    # Docker CLI + Compose
+    mkdir -p /etc/apt/keyrings && \
+    . /etc/os-release && \
+    curl -fsSL "https://download.docker.com/linux/$ID/gpg" -o /etc/apt/keyrings/docker.asc && \
+    chmod a+r /etc/apt/keyrings/docker.asc && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$ID $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli docker-compose-plugin && \
+    ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose || true
+
+    # Create SSH directory
+    mkdir -p /root/.ssh
+'
+
+# 3. If Docker CLI installation failed, attempt host binary symlink
+if ! docker exec "$CONTAINER" command -v docker >/dev/null 2>&1; then
+    echo "⚠️  Apt failed. Attempting to use host binary..."
+    docker exec -u root "$CONTAINER" ln -sf /usr/bin/docker /usr/local/bin/docker
+fi
+
+# 4. Unlock Docker socket
+docker exec -u root "$CONTAINER" chmod 666 /var/run/docker.sock
+
+# 5. Copy host SSH config & keys
+if [ -d "$HOME/.ssh" ]; then
+    echo "🔑 Copying host SSH keys and config..."
+    docker exec "$CONTAINER" rm -rf /root/.ssh
+    docker cp "$HOME/.ssh" "$CONTAINER:/root/"
+    docker exec -u root "$CONTAINER" bash -c '
+        chown -R root:root /root/.ssh
+        chmod 700 /root/.ssh
+        chmod 600 /root/.ssh/id_* 2>/dev/null || true
+        chmod 644 /root/.ssh/*.pub /root/.ssh/known_hosts /root/.ssh/config 2>/dev/null || true
+    '
+    echo "    ✅ SSH keys and config copied."
+else
+    echo "    ⚠️  No ~/.ssh found on host."
+fi
+
+# 6. Workspace verification
+CONTAINER_PWD=$(docker exec "$CONTAINER" pwd)
+echo "🔍 Inside the container, your working directory is: $CONTAINER_PWD"
+echo "🎉 Done! Docker CLI, Compose, SSH, ping, and rsync are ready."

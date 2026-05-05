@@ -1,0 +1,141 @@
+#!/bin/bash
+set -e
+
+# --- Argument Parsing ---
+SUFFIX=""
+COPY_GITHUB=false
+
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        --copy-github|-g) COPY_GITHUB=true; shift ;;
+        -h|--help)
+            echo "Usage: $0 [SUFFIX] [--copy-github|-g]"
+            exit 0
+            ;;
+        -*) echo "❌ Unknown parameter passed: $1"; exit 1 ;;
+        *) SUFFIX="$1"; shift ;;
+    esac
+done
+
+# 1. Identify the container
+BASE_NAME="codex-$(basename "$(pwd)")"
+CONTAINER_NAME="${SUFFIX:+$BASE_NAME-$SUFFIX}"
+CONTAINER_NAME="${CONTAINER_NAME:-$BASE_NAME}"
+
+echo "🚀 Configuring container: $CONTAINER_NAME"
+
+if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo "❌ Error: Container '$CONTAINER_NAME' is not running."
+    exit 1
+fi
+
+# 2. Install Dependencies (Optimized with existence checks)
+echo "📦 Checking system tools inside container..."
+docker exec -u 0 "$CONTAINER_NAME" bash -c '
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Function to install apt packages only if missing
+    install_apt_if_missing() {
+        MISSING_PKGS=""
+        for pkg in "$@"; do
+            if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+                MISSING_PKGS="$MISSING_PKGS $pkg"
+            fi
+        done
+        if [ -n "$MISSING_PKGS" ]; then
+            echo "Installing missing packages:$MISSING_PKGS..."
+            apt-get update -qq && apt-get install -y -qq $MISSING_PKGS
+        fi
+    }
+
+    install_apt_if_missing apt-transport-https ca-certificates gnupg curl openssh-client git iputils-ping rsync unzip
+
+    # --- Install GitHub CLI (gh) ---
+    if ! command -v gh &> /dev/null; then
+        echo "Installing GitHub CLI..."
+        mkdir -p -m 755 /etc/apt/keyrings
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+        apt-get update -qq && apt-get install gh -y -qq
+    fi
+
+    # --- Install kubectl ---
+    if ! command -v kubectl &> /dev/null; then
+        echo "Installing kubectl..."
+        KUBE_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+        curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/$KUBE_VERSION/bin/linux/amd64/kubectl"
+        chmod +x /usr/local/bin/kubectl
+    fi
+
+    # --- Install Helm ---
+    if ! command -v helm &> /dev/null; then
+        echo "Installing Helm..."
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        chmod 700 get_helm.sh && ./get_helm.sh > /dev/null
+        rm get_helm.sh
+    fi
+
+    # --- Install Kustomize ---
+    if ! command -v kustomize &> /dev/null; then
+        echo "Installing Kustomize..."
+        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash > /dev/null
+        mv kustomize /usr/local/bin/
+    fi
+
+    # --- Install Google Cloud SDK ---
+    if ! command -v gcloud &> /dev/null; then
+        echo "Installing Google Cloud SDK..."
+        curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+        echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | tee /etc/apt/sources.list.d/google-cloud-sdk.list
+        apt-get update -qq && apt-get install -y -qq google-cloud-cli google-cloud-sdk-gke-gcloud-auth-plugin
+    fi
+
+    # --- Install AWS CLI v2 ---
+    if ! command -v aws &> /dev/null; then
+        echo "Installing AWS CLI v2..."
+        curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+        unzip -q awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
+    fi
+
+    mkdir -p /root/.kube /root/.config /root/.ssh /root/.aws /root/.config/helm
+'
+
+# 3. Copy Host Credentials (Fast part)
+echo "🔑 Syncing credentials..."
+
+# SSH
+[ -d "$HOME/.ssh" ] && {
+    docker exec "$CONTAINER_NAME" rm -rf /root/.ssh
+    docker cp "$HOME/.ssh" "$CONTAINER_NAME:/root/"
+    docker exec -u 0 "$CONTAINER_NAME" bash -c 'chown -R root:root /root/.ssh && chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_* 2>/dev/null || true'
+    echo "  ✅ SSH config synced."
+}
+
+# GitHub CLI
+if [ "$COPY_GITHUB" = true ]; then
+    [ -f "$HOME/.gitconfig" ] && docker cp "$HOME/.gitconfig" "$CONTAINER_NAME:/root/.gitconfig"
+    [ -d "$HOME/.config/gh" ] && {
+        docker exec "$CONTAINER_NAME" mkdir -p /root/.config/gh
+        docker cp "$HOME/.config/gh" "$CONTAINER_NAME:/root/.config/"
+    }
+    if command -v gh &>/dev/null; then
+        HOST_GH_TOKEN=$(gh auth token 2>/dev/null || echo "")
+        [ -n "$HOST_GH_TOKEN" ] && {
+            docker exec -i "$CONTAINER_NAME" bash -c "echo '$HOST_GH_TOKEN' | gh auth login --with-token"
+            docker exec -u 0 "$CONTAINER_NAME" gh auth setup-git
+            echo "  ✅ GitHub Auth synced."
+        }
+    fi
+fi
+
+# Kube / GCloud / AWS
+[ -f "$HOME/.kube/config" ] && docker cp "$HOME/.kube/config" "$CONTAINER_NAME:/root/.kube/config"
+[ -d "$HOME/.config/gcloud" ] && docker cp "$HOME/.config/gcloud" "$CONTAINER_NAME:/root/.config/"
+[ -d "$HOME/.aws" ] && {
+    docker exec "$CONTAINER_NAME" rm -rf /root/.aws
+    docker cp "$HOME/.aws" "$CONTAINER_NAME:/root/"
+    docker exec -u 0 "$CONTAINER_NAME" bash -c "chown -R root:root /root/.aws && (grep -q 'AWS_PROFILE' /root/.bashrc || echo 'export AWS_PROFILE=defense-demo' >> /root/.bashrc)"
+    echo "  ✅ Cloud configs synced."
+}
+
+echo -e "---\n🎉 Done! Container is ready."
