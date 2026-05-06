@@ -3,7 +3,7 @@ set -e
 
 # --- Argument Parsing ---
 SUFFIX=""
-COPY_GITHUB=false
+COPY_GITHUB=true
 HOST_CODER_CONFIG_DIR="${CODER_CONFIG_DIR:-$HOME/.config/coderv2}"
 
 while [ "$#" -gt 0 ]; do
