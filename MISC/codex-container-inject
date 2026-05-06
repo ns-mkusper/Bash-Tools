@@ -4,6 +4,7 @@ set -e
 # --- Argument Parsing ---
 SUFFIX=""
 COPY_GITHUB=false
+HOST_CODER_CONFIG_DIR="${CODER_CONFIG_DIR:-$HOME/.config/coderv2}"
 
 while [ "$#" -gt 0 ]; do
     case $1 in
@@ -97,7 +98,7 @@ docker exec -u 0 "$CONTAINER_NAME" bash -c '
         unzip -q awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
     fi
 
-    mkdir -p /root/.kube /root/.config /root/.ssh /root/.aws /root/.config/helm
+    mkdir -p /root/.kube /root/.config /root/.ssh /root/.aws /root/.config/helm /root/.config/coderv2
 '
 
 # 3. Copy Host Credentials (Fast part)
@@ -137,5 +138,31 @@ fi
     docker exec -u 0 "$CONTAINER_NAME" bash -c "chown -R root:root /root/.aws && (grep -q 'AWS_PROFILE' /root/.bashrc || echo 'export AWS_PROFILE=defense-demo' >> /root/.bashrc)"
     echo "  ✅ Cloud configs synced."
 }
+
+# Coder CLI
+if [ -d "$HOST_CODER_CONFIG_DIR" ]; then
+    docker exec -u 0 "$CONTAINER_NAME" bash -c 'rm -rf /root/.config/coderv2 && mkdir -p /root/.config/coderv2'
+    docker cp "$HOST_CODER_CONFIG_DIR/." "$CONTAINER_NAME:/root/.config/coderv2/"
+    docker exec -u 0 "$CONTAINER_NAME" bash -c '
+        chown -R root:root /root/.config/coderv2
+        find /root/.config/coderv2 -type d -exec chmod 700 {} +
+        find /root/.config/coderv2 -type f -exec chmod 600 {} +
+    '
+    echo "  ✅ Coder config synced."
+fi
+
+if command -v coder >/dev/null 2>&1; then
+    HOST_CODER_TOKEN=$(coder login token 2>/dev/null || true)
+    if [ -n "$HOST_CODER_TOKEN" ]; then
+        printf '%s\n' "$HOST_CODER_TOKEN" | docker exec -i -u 0 "$CONTAINER_NAME" bash -c 'umask 077 && mkdir -p /root/.config/coderv2 && cat > /root/.config/coderv2/session'
+        if [ -f "$HOST_CODER_CONFIG_DIR/url" ]; then
+            docker cp "$HOST_CODER_CONFIG_DIR/url" "$CONTAINER_NAME:/root/.config/coderv2/url"
+        elif [ -n "${CODER_URL:-}" ]; then
+            printf '%s\n' "$CODER_URL" | docker exec -i -u 0 "$CONTAINER_NAME" bash -c 'umask 077 && cat > /root/.config/coderv2/url'
+        fi
+        docker exec -u 0 "$CONTAINER_NAME" bash -c 'chown -R root:root /root/.config/coderv2 && chmod 600 /root/.config/coderv2/session /root/.config/coderv2/url 2>/dev/null || true'
+        echo "  ✅ Coder login token synced."
+    fi
+fi
 
 echo -e "---\n🎉 Done! Container is ready."
