@@ -27,11 +27,29 @@ while [ "$#" -gt 0 ]; do
             fi
             shift
             ;;
+        --container-suffix|-s)
+            shift
+            if [ -z "${1:-}" ]; then
+                echo "❌ Error: --container-suffix requires a value."
+                exit 1
+            fi
+            SUFFIX="$1"
+            shift
+            ;;
+        --container-suffix=*)
+            SUFFIX="${1#*=}"
+            if [ -z "$SUFFIX" ]; then
+                echo "❌ Error: --container-suffix requires a value."
+                exit 1
+            fi
+            shift
+            ;;
         -h|--help)
-            echo "Usage: $0 [SUFFIX] [--copy-github|-g] [--container-prefix|-p PREFIX]"
+            echo "Usage: $0 [SUFFIX] [--copy-github|-g] [--container-prefix|-p PREFIX] [--container-suffix|-s SUFFIX]"
             echo
             echo "Container name: PREFIX-$(basename "$(pwd)")[-SUFFIX]"
             echo "Default prefix: codex"
+            echo "The positional SUFFIX is still supported for compatibility."
             exit 0
             ;;
         -*) echo "❌ Unknown parameter passed: $1"; exit 1 ;;
@@ -120,6 +138,10 @@ docker exec -u 0 "$CONTAINER_NAME" bash -c '
     fi
 
     mkdir -p /root/.kube /root/.config /root/.ssh /root/.aws /root/.config/helm /root/.config/coderv2
+
+    if ! git config --global --get-all safe.directory | grep -qxF "*"; then
+        git config --global --add safe.directory "*"
+    fi
 '
 
 # 3. Copy Host Credentials (Fast part)
