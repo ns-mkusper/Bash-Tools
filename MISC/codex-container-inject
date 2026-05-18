@@ -4,13 +4,34 @@ set -e
 # --- Argument Parsing ---
 SUFFIX=""
 COPY_GITHUB=true
+CONTAINER_NAME_PREFIX="codex"
 HOST_CODER_CONFIG_DIR="${CODER_CONFIG_DIR:-$HOME/.config/coderv2}"
 
 while [ "$#" -gt 0 ]; do
     case $1 in
         --copy-github|-g) COPY_GITHUB=true; shift ;;
+        --container-prefix|-p)
+            shift
+            if [ -z "${1:-}" ]; then
+                echo "❌ Error: --container-prefix requires a value."
+                exit 1
+            fi
+            CONTAINER_NAME_PREFIX="$1"
+            shift
+            ;;
+        --container-prefix=*)
+            CONTAINER_NAME_PREFIX="${1#*=}"
+            if [ -z "$CONTAINER_NAME_PREFIX" ]; then
+                echo "❌ Error: --container-prefix requires a value."
+                exit 1
+            fi
+            shift
+            ;;
         -h|--help)
-            echo "Usage: $0 [SUFFIX] [--copy-github|-g]"
+            echo "Usage: $0 [SUFFIX] [--copy-github|-g] [--container-prefix|-p PREFIX]"
+            echo
+            echo "Container name: PREFIX-$(basename "$(pwd)")[-SUFFIX]"
+            echo "Default prefix: codex"
             exit 0
             ;;
         -*) echo "❌ Unknown parameter passed: $1"; exit 1 ;;
@@ -19,7 +40,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 # 1. Identify the container
-BASE_NAME="codex-$(basename "$(pwd)")"
+BASE_NAME="$CONTAINER_NAME_PREFIX-$(basename "$(pwd)")"
 CONTAINER_NAME="${SUFFIX:+$BASE_NAME-$SUFFIX}"
 CONTAINER_NAME="${CONTAINER_NAME:-$BASE_NAME}"
 
