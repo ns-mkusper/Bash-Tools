@@ -139,8 +139,8 @@ docker exec -u 0 "$CONTAINER_NAME" bash -c '
 
     mkdir -p /root/.kube /root/.config /root/.ssh /root/.aws /root/.config/helm /root/.config/coderv2
 
-    if ! git config --global --get-all safe.directory | grep -qxF "*"; then
-        git config --global --add safe.directory "*"
+    if ! git config --system --get-all safe.directory | grep -qxF "/workspace"; then
+        git config --system --add safe.directory /workspace
     fi
 '
 
