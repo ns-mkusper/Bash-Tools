@@ -47,9 +47,10 @@ while [ "$#" -gt 0 ]; do
         -h|--help)
             echo "Usage: $0 [SUFFIX] [--copy-github|-g] [--container-prefix|-p PREFIX] [--container-suffix|-s SUFFIX]"
             echo
-            echo "Container name: PREFIX-$(basename "$(pwd)")[-SUFFIX]"
+            echo "Container name match: PREFIX-$(basename "$(pwd)") or PREFIX-$(basename "$(pwd)")-*"
             echo "Default prefix: codex"
-            echo "The positional SUFFIX is still supported for compatibility."
+            echo "All matching running containers are configured in parallel."
+            echo "The positional SUFFIX is still supported for exact-target compatibility."
             exit 0
             ;;
         -*) echo "❌ Unknown parameter passed: $1"; exit 1 ;;
@@ -57,20 +58,37 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-# 1. Identify the container
 BASE_NAME="$CONTAINER_NAME_PREFIX-$(basename "$(pwd)")"
-CONTAINER_NAME="${SUFFIX:+$BASE_NAME-$SUFFIX}"
-CONTAINER_NAME="${CONTAINER_NAME:-$BASE_NAME}"
 
-echo "🚀 Configuring container: $CONTAINER_NAME"
+find_matching_containers() {
+    docker ps --format '{{.Names}}' | awk -v base="$BASE_NAME" '
+        index($0, base) == 1 && (length($0) == length(base) || substr($0, length(base) + 1, 1) == "-")
+    '
+}
 
-if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
-    echo "❌ Error: Container '$CONTAINER_NAME' is not running."
+if [ -n "$SUFFIX" ]; then
+    TARGET_CONTAINERS=("$BASE_NAME-$SUFFIX")
+else
+    mapfile -t TARGET_CONTAINERS < <(find_matching_containers)
+fi
+
+if [ "${#TARGET_CONTAINERS[@]}" -eq 0 ]; then
+    echo "❌ Error: No running containers match '$BASE_NAME' or '$BASE_NAME-*'."
     exit 1
 fi
 
-# 2. Install Dependencies (Optimized with existence checks)
-echo "📦 Checking system tools inside container..."
+if [ -n "$SUFFIX" ] && ! docker ps --format '{{.Names}}' | grep -qxF "${TARGET_CONTAINERS[0]}"; then
+    echo "❌ Error: Container '${TARGET_CONTAINERS[0]}' is not running."
+    exit 1
+fi
+
+inject_container() {
+local CONTAINER_NAME="$1"
+
+echo "🚀 Configuring container: $CONTAINER_NAME"
+
+# 1. Install Dependencies (Optimized with existence checks)
+echo "📦 Checking system tools inside container: $CONTAINER_NAME"
 docker exec -u 0 "$CONTAINER_NAME" bash -c '
     export DEBIAN_FRONTEND=noninteractive
 
@@ -144,8 +162,8 @@ docker exec -u 0 "$CONTAINER_NAME" bash -c '
     fi
 '
 
-# 3. Copy Host Credentials (Fast part)
-echo "🔑 Syncing credentials..."
+# 2. Copy Host Credentials (Fast part)
+echo "🔑 Syncing credentials: $CONTAINER_NAME"
 
 # SSH
 [ -d "$HOME/.ssh" ] && {
@@ -208,4 +226,25 @@ if command -v coder >/dev/null 2>&1; then
     fi
 fi
 
-echo -e "---\n🎉 Done! Container is ready."
+echo -e "---\n🎉 Done! Container '$CONTAINER_NAME' is ready."
+}
+
+echo "🚀 Configuring ${#TARGET_CONTAINERS[@]} container(s): ${TARGET_CONTAINERS[*]}"
+
+PIDS=()
+for CONTAINER_NAME in "${TARGET_CONTAINERS[@]}"; do
+    (
+        inject_container "$CONTAINER_NAME"
+    ) &
+    PIDS+=("$!")
+done
+
+EXIT_STATUS=0
+for i in "${!PIDS[@]}"; do
+    if ! wait "${PIDS[$i]}"; then
+        echo "❌ Injection failed for '${TARGET_CONTAINERS[$i]}'."
+        EXIT_STATUS=1
+    fi
+done
+
+exit "$EXIT_STATUS"

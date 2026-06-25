@@ -1,16 +1,61 @@
 #!/bin/bash
 
-# Usage: ./inject_dind.sh [-s|--suffix <suffix>] [container_name_or_id]
+# Usage: ./codex-dind-inject [container_name_or_id] [--container-prefix|-p PREFIX] [--container-suffix|-s SUFFIX]
 
 SUFFIX=""
 CONTAINER_ARG=""
+CONTAINER_NAME_PREFIX="codex"
 
 # Parse command-line arguments using standard POSIX brackets
 while [ "$#" -gt 0 ]; do
     case $1 in
-        -s|--suffix)
-            SUFFIX="$2"
-            shift 2
+        --container-prefix|-p)
+            shift
+            if [ -z "${1:-}" ]; then
+                echo "❌ Error: --container-prefix requires a value."
+                exit 1
+            fi
+            CONTAINER_NAME_PREFIX="$1"
+            shift
+            ;;
+        --container-prefix=*)
+            CONTAINER_NAME_PREFIX="${1#*=}"
+            if [ -z "$CONTAINER_NAME_PREFIX" ]; then
+                echo "❌ Error: --container-prefix requires a value."
+                exit 1
+            fi
+            shift
+            ;;
+        --container-suffix|-s|--suffix)
+            shift
+            if [ -z "${1:-}" ]; then
+                echo "❌ Error: --container-suffix requires a value."
+                exit 1
+            fi
+            SUFFIX="$1"
+            shift
+            ;;
+        --container-suffix=*|--suffix=*)
+            SUFFIX="${1#*=}"
+            if [ -z "$SUFFIX" ]; then
+                echo "❌ Error: --container-suffix requires a value."
+                exit 1
+            fi
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: $0 [container_name_or_id] [--container-prefix|-p PREFIX] [--container-suffix|-s SUFFIX]"
+            echo
+            echo "Container name match: PREFIX-$(basename "$(pwd)") or PREFIX-$(basename "$(pwd)")-*"
+            echo "Default prefix: codex"
+            echo "All matching running containers are configured in parallel."
+            echo "An explicit container_name_or_id still overrides matching."
+            echo "The suffix option is still supported for exact-target compatibility."
+            exit 0
+            ;;
+        -*)
+            echo "❌ Unknown parameter passed: $1"
+            exit 1
             ;;
         *)
             CONTAINER_ARG="$1"
@@ -19,25 +64,43 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-# If a suffix is provided but doesn't start with a dash, add one automatically
-case "$SUFFIX" in
-    -*) ;; # Starts with a dash, do nothing
-    "") ;; # Is empty, do nothing
-    *) SUFFIX="-$SUFFIX" ;; # Doesn't start with a dash, add one
-esac
+BASE_NAME="$CONTAINER_NAME_PREFIX-$(basename "$(pwd)")"
+DEFAULT_NAME="${SUFFIX:+$BASE_NAME-$SUFFIX}"
+DEFAULT_NAME="${DEFAULT_NAME:-$BASE_NAME}"
 
-PROJECT_NAME=$(basename "$(pwd)")
-DEFAULT_NAME="codex-${PROJECT_NAME}${SUFFIX}"
+find_matching_containers() {
+    docker ps --format '{{.Names}}' | awk -v base="$BASE_NAME" '
+        index($0, base) == 1 && (length($0) == length(base) || substr($0, length(base) + 1, 1) == "-")
+    '
+}
 
-# Use the specific container arg if provided, otherwise fall back to the default + suffix
-CONTAINER=${CONTAINER_ARG:-$DEFAULT_NAME}
+if [ -n "$CONTAINER_ARG" ]; then
+    TARGET_CONTAINERS=("$CONTAINER_ARG")
+elif [ -n "$SUFFIX" ]; then
+    TARGET_CONTAINERS=("$DEFAULT_NAME")
+else
+    mapfile -t TARGET_CONTAINERS < <(find_matching_containers)
+fi
+
+if [ "${#TARGET_CONTAINERS[@]}" -eq 0 ]; then
+    echo "❌ Error: No running containers match '$BASE_NAME' or '$BASE_NAME-*'."
+    exit 1
+fi
+
+if [ -n "$SUFFIX" ] && [ -z "$CONTAINER_ARG" ] && ! docker ps --format '{{.Names}}' | grep -qxF "${TARGET_CONTAINERS[0]}"; then
+    echo "❌ Error: Container '${TARGET_CONTAINERS[0]}' is not running."
+    exit 1
+fi
+
+inject_container() {
+local CONTAINER="$1"
 
 echo "💉 Injecting Docker, Compose, and remote tooling into '$CONTAINER'..."
 
 # 1. Check Docker socket
 if ! docker exec "$CONTAINER" ls /var/run/docker.sock >/dev/null 2>&1; then
     echo "❌ Error: /var/run/docker.sock is NOT mounted."
-    exit 1
+    return 1
 fi
 
 # 2. Install Docker CLI & Compose Plugin + SSH, ping, rsync (Debian/Ubuntu)
@@ -59,34 +122,55 @@ docker exec -u root "$CONTAINER" bash -c '
 
     # Create SSH directory
     mkdir -p /root/.ssh
-'
+' || return 1
 
 # 3. If Docker CLI installation failed, attempt host binary symlink
 if ! docker exec "$CONTAINER" command -v docker >/dev/null 2>&1; then
     echo "⚠️  Apt failed. Attempting to use host binary..."
-    docker exec -u root "$CONTAINER" ln -sf /usr/bin/docker /usr/local/bin/docker
+    docker exec -u root "$CONTAINER" ln -sf /usr/bin/docker /usr/local/bin/docker || return 1
 fi
 
 # 4. Unlock Docker socket
-docker exec -u root "$CONTAINER" chmod 666 /var/run/docker.sock
+docker exec -u root "$CONTAINER" chmod 666 /var/run/docker.sock || return 1
 
 # 5. Copy host SSH config & keys
 if [ -d "$HOME/.ssh" ]; then
     echo "🔑 Copying host SSH keys and config..."
-    docker exec "$CONTAINER" rm -rf /root/.ssh
-    docker cp "$HOME/.ssh" "$CONTAINER:/root/"
+    docker exec "$CONTAINER" rm -rf /root/.ssh || return 1
+    docker cp "$HOME/.ssh" "$CONTAINER:/root/" || return 1
     docker exec -u root "$CONTAINER" bash -c '
         chown -R root:root /root/.ssh
         chmod 700 /root/.ssh
         chmod 600 /root/.ssh/id_* 2>/dev/null || true
         chmod 644 /root/.ssh/*.pub /root/.ssh/known_hosts /root/.ssh/config 2>/dev/null || true
-    '
+    ' || return 1
     echo "    ✅ SSH keys and config copied."
 else
     echo "    ⚠️  No ~/.ssh found on host."
 fi
 
 # 6. Workspace verification
-CONTAINER_PWD=$(docker exec "$CONTAINER" pwd)
+CONTAINER_PWD=$(docker exec "$CONTAINER" pwd) || return 1
 echo "🔍 Inside the container, your working directory is: $CONTAINER_PWD"
 echo "🎉 Done! Docker CLI, Compose, SSH, ping, and rsync are ready."
+}
+
+echo "💉 Injecting into ${#TARGET_CONTAINERS[@]} container(s): ${TARGET_CONTAINERS[*]}"
+
+PIDS=()
+for CONTAINER in "${TARGET_CONTAINERS[@]}"; do
+    (
+        inject_container "$CONTAINER"
+    ) &
+    PIDS+=("$!")
+done
+
+EXIT_STATUS=0
+for i in "${!PIDS[@]}"; do
+    if ! wait "${PIDS[$i]}"; then
+        echo "❌ Injection failed for '${TARGET_CONTAINERS[$i]}'."
+        EXIT_STATUS=1
+    fi
+done
+
+exit "$EXIT_STATUS"
