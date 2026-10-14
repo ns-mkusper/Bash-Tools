@@ -44,6 +44,14 @@ esac
 if [ -z "$PREFETCH" ]; then
     if [ "$SLOW_FS" == "YES" ]; then PREFETCH=8; else PREFETCH=0; fi
 fi
+# Sorting by width/height/pixels makes feh fully load every image before it
+# can show anything (~1 s per file over sshfs). On slow mounts fall back to
+# file size, which only needs stat() and tracks "biggest picture" well enough.
+if [ "$SLOW_FS" == "YES" ]; then
+    case "$SORT" in
+        width|height|pixels) echo "feh-open: --sort=$SORT would preload every image over a slow mount; using size instead" >&2; SORT=size ;;
+    esac
+fi
 # if [ $INSTANCES -gt 7 ];then
 #     RELOAD_TIME_SECONDS=0
 # else
