@@ -5,54 +5,20 @@
 #window_dimensions=$(xwininfo -id $(xprop -root | awk '/_NET_ACTIVE_WINDOW\(WINDOW\)/{print $NF}') | grep -E '(Width|Height):' | sed 's/.*: \(.*\)/\1/' | sed ':a;N;$!ba;s/\n/x/')
 #window_dimensions="2560x1440"
 window_dimensions="2350x1674"
-ENDARG=NO
 NORELOAD=false
-while [[ $# > 1 ]];do
-    key="$1"
-
-    case $key in
-        -i|--instances)
-            INSTANCES="$2"
-            NORELOAD=true
-            shift
-            ;;
-        -s|--sort)
-            SORT="$2"
-            shift
-            ;;
-        -t|--scrollstep)
-            SCROLLSTEP=$2
-            shift
-            ;;
-        -n|--noreload)
-            NORELOAD=true
-            shift
-            ;;
-        -r|--reverse)
-            REVERSE=YES
-            shift 
-            ;;
-        -v|--verbose)
-            VERBOSE=YES
-            shift 
-            ;;
-        *)
-            echo "$1 $2"
-            ;;
+# Options may appear in any order; the last non-option argument is the file or directory to open.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -i|--instances)  INSTANCES="$2"; NORELOAD=true; shift 2 ;;
+        -s|--sort)       SORT="$2"; shift 2 ;;
+        -t|--scrollstep) SCROLLSTEP="$2"; shift 2 ;;
+        -p|--prefetch)   PREFETCH="$2"; shift 2 ;;
+        -n|--noreload)   NORELOAD=true; shift ;;
+        -r|--reverse)    REVERSE=YES; shift ;;
+        -v|--verbose)    VERBOSE=YES; shift ;;
+        *)               DIR="$(readlink -f "$1")"; shift ;;
     esac
-    if [ -d "$1" ];then
-        DIR="$1"
-        echo "$DIR"
-    elif [ -f $1 ];then         echo "$DIR" FILE="$1";DIR="$(readlink -f "$FILE" | sed 's/\/[^\/]\{1,\}$//')"
-    fi
-    
-    shift
 done
-
-if [ -z "$DIR" ];then
-    DIR="$1"
-    DIR="$(readlink -f "$DIR")"
-fi
 
 
 
@@ -66,13 +32,26 @@ SCROLLSTEP=300
     fi
 fi
 if [ -z $VERBOSE ]; then VERBOSE=NO;fi
+
+# Slow filesystems (sshfs and other FUSE mounts, NFS, CIFS): turn on feh's
+# background read-ahead and stretch the auto-reload, since every reload
+# re-lists the whole directory over the network.
+FSTYPE="$(stat -f -c %T "$DIR" 2>/dev/null)"
+case "$FSTYPE" in
+    fuseblk|fuse*|nfs*|cifs|smb*) SLOW_FS=YES ;;
+    *) SLOW_FS=NO ;;
+esac
+if [ -z "$PREFETCH" ]; then
+    if [ "$SLOW_FS" == "YES" ]; then PREFETCH=8; else PREFETCH=0; fi
+fi
 # if [ $INSTANCES -gt 7 ];then
 #     RELOAD_TIME_SECONDS=0
 # else
 # RELOAD_TIME_SECONDS=
 #     fi
 
-declare -a FEH_ARGS=( --sort=$SORT --no-jump-on-resort --force-aliasing  --fontpath=/usr/share/fonts/dejavu --font="DejaVuSans/13" --draw-tinted --scroll-step=$SCROLLSTEP --geometry=${window_dimensions} --draw-filename --auto-zoom)
+if [ $SORT == "random" ] || [ $SORT == "shuffle" ];then SORT_ARG=--randomize; else SORT_ARG=--sort=$SORT; fi
+declare -a FEH_ARGS=( $SORT_ARG --cache-size 512 --no-jump-on-resort --force-aliasing  --fontpath=/usr/share/fonts/truetype/dejavu --font="DejaVuSans/13" --draw-tinted --scroll-step=$SCROLLSTEP --geometry=${window_dimensions} --draw-filename --auto-zoom)
 
 if [ $SORT == "name" ];then
     SORT=filename
@@ -81,7 +60,11 @@ if [ $SORT == "name" ];then
 
 if [ -z $RELOAD_TIME_SECONDS ]; then
     if [ $SORT == "filename" -o $SORT == "name"  ];then
-        RELOAD_TIME_SECONDS=$(shuf -i 30-75 -n 1)
+        if [ "$SLOW_FS" == "YES" ]; then
+            RELOAD_TIME_SECONDS=$(shuf -i 300-600 -n 1)
+        else
+            RELOAD_TIME_SECONDS=$(shuf -i 30-75 -n 1)
+        fi
         if [ $NORELOAD == "false" ];then 
             FEH_ARGS=(${FEH_ARGS[@]}   --reload $RELOAD_TIME_SECONDS )
             fi
@@ -103,6 +86,7 @@ if [[ "$DIR" == *"/jav"* ]];then
 fi
 
 if [ $REVERSE == "YES" ];then FEH_ARGS=(${FEH_ARGS[@]} --reverse) ;fi
+if [ "$PREFETCH" -gt 0 ] 2>/dev/null;then FEH_ARGS=(${FEH_ARGS[@]} --prefetch $PREFETCH) ;fi
 
 open_file() {
     DIR_LOCAL="$1"
@@ -151,7 +135,8 @@ fi
 
         else
 	    POSITION=$((skip_val * i))
-            let "POSITION += +$(shuf -i 1-$((skip_val / 2)) -n 1)"
+            half=$((skip_val / 2)); [ $half -lt 1 ] && half=1
+            let "POSITION += $(shuf -i 1-$half -n 1)"
         fi
 
         if [ $POSITION -gt $num_of_files ];then
