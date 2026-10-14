@@ -44,12 +44,15 @@ esac
 if [ -z "$PREFETCH" ]; then
     if [ "$SLOW_FS" == "YES" ]; then PREFETCH=8; else PREFETCH=0; fi
 fi
-# Sorting by width/height/pixels makes feh fully load every image before it
-# can show anything (~1 s per file over sshfs). On slow mounts fall back to
-# file size, which only needs stat() and tracks "biggest picture" well enough.
+# Sorting by width/height/pixels needs every image's dimensions up front. The
+# feh fork reads them from the file headers with 16 threads (~60 ms per file
+# over sshfs), so a few thousand files still means a couple of minutes before
+# the window appears. Say so rather than look hung.
 if [ "$SLOW_FS" == "YES" ]; then
     case "$SORT" in
-        width|height|pixels) echo "feh-open: --sort=$SORT would preload every image over a slow mount; using size instead" >&2; SORT=size ;;
+        width|height|pixels)
+            NFILES=$(ls "$DIR" 2>/dev/null | wc -l)
+            echo "feh-open: --sort=$SORT on a slow mount: reading $NFILES headers first, expect ~$((NFILES * 60 / 1000 + 5)) s before the window opens" >&2 ;;
     esac
 fi
 # if [ $INSTANCES -gt 7 ];then
