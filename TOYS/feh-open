@@ -151,7 +151,15 @@ open_grouped() {
         listfile="/tmp/feh_grouped_$$_${N}.txt"
         build_grouped_list "$DIR_LOCAL" "$N" "$listfile"
         echo "group-max $N: $(wc -l < "$listfile") images from $(cat "$listfile.groups") groups"; rm -f "$listfile.groups"
-        feh "${GROUP_ARGS[@]}" --title "feh [%u of %l] - %f  (max $N per group)" --filelist "$listfile" &
+        # -i W as well: W windows on this list, each starting at a different
+        # group block spread evenly through it (1 window = the whole list)
+        W=$INSTANCES; [ "$W" == "all" ] && W=8
+        total=$(wc -l < "$listfile")
+        [ $W -gt $total ] && W=$total
+        for ((w = 0; w < W; w++)); do
+            ln=$(( (w * total) / W + 1 ))
+            feh "${GROUP_ARGS[@]}" --title "feh [%u of %l] - %f  (max $N per group)" --start-at "$(sed -n ${ln}p "$listfile")" --filelist "$listfile" &
+        done
     done
 }
 
