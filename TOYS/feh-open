@@ -107,41 +107,51 @@ open_file() {
     feh ${FEH_ARGS[@]} --start-at "${FILE_LOCAL}" "$DIR_LOCAL" &
 }
 
-# Build a file list with at most $2 randomly chosen images from each
-# filename-prefix group in directory $1, written to $3 (absolute paths).
+# Build a file list from directory $1 with at most $2 images per
+# filename-prefix group, written to $3 (absolute paths):
+#   - within a group the picks are spread evenly through the sequence
+#     (sorted by name, i.e. by timestamp for the pipeline's exports),
+#   - each group's picks stay together as one block, in sequence order,
+#   - the blocks come out in random order.
 # The group key is the pipeline's episode prefix (everything before
 # "__t<seconds>s__s<score>.<ext>") when present, otherwise the name with its
 # extension and any trailing digits/separators removed ("set_001.jpg" -> "set").
 build_grouped_list() {
     find "$1" -mindepth 1 -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.webp' \) -printf '%f\n' \
+    | sort \
     | awk -v n="$2" -v dir="$1" -v seed="$RANDOM$$" '
-        BEGIN { srand(seed) }
+        BEGIN { srand(seed); OFS = "\t" }
         {
             f = $0; k = f
             if (!sub(/__t[0-9.]+s__s[0-9.]+\.[A-Za-z]+$/, "", k)) {
                 sub(/\.[A-Za-z0-9]+$/, "", k); sub(/[0-9._ -]+$/, "", k)
             }
+            if (!(k in cnt)) { order[k] = rand(); groups++ }
             cnt[k]++; files[k, cnt[k]] = f
         }
         END {
             for (k in cnt) {
-                m = cnt[k]
-                for (i = m; i > 1; i--) { j = int(rand() * i) + 1; t = files[k, i]; files[k, i] = files[k, j]; files[k, j] = t }
-                lim = (m < n) ? m : n
-                for (i = 1; i <= lim; i++) print dir "/" files[k, i]
-                groups++
+                m = cnt[k]; lim = (m < n) ? m : n
+                for (i = 0; i < lim; i++) {
+                    idx = int((i + 0.5) * m / lim) + 1      # evenly spaced through the group
+                    print order[k], i, dir "/" files[k, idx]
+                }
             }
             print groups > ("'"$3"'.groups")
-        }' > "$3"
+        }' \
+    | sort -t "$(printf '\t')" -k1,1g -k2,2n | cut -f3- > "$3"
 }
 
 open_grouped() {
     DIR_LOCAL="$1"
+    # the list is already in the intended order: drop feh's own sort/shuffle
+    declare -a GROUP_ARGS=()
+    for a in "${FEH_ARGS[@]}"; do case "$a" in --randomize|--sort=*|--reverse) ;; *) GROUP_ARGS+=("$a") ;; esac; done
     for N in ${GROUPMAX//,/ }; do
         listfile="/tmp/feh_grouped_$$_${N}.txt"
         build_grouped_list "$DIR_LOCAL" "$N" "$listfile"
         echo "group-max $N: $(wc -l < "$listfile") images from $(cat "$listfile.groups") groups"; rm -f "$listfile.groups"
-        feh ${FEH_ARGS[@]} --title "feh [%u of %l] - %f  (max $N per group)" --filelist "$listfile" &
+        feh "${GROUP_ARGS[@]}" --title "feh [%u of %l] - %f  (max $N per group)" --filelist "$listfile" &
     done
 }
 
