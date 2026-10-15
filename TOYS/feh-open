@@ -13,6 +13,7 @@ while [ $# -gt 0 ]; do
         -s|--sort)       SORT="$2"; shift 2 ;;
         -t|--scrollstep) SCROLLSTEP="$2"; shift 2 ;;
         -p|--prefetch)   PREFETCH="$2"; shift 2 ;;
+        -g|--group-max)  GROUPMAX="$2"; shift 2 ;;   # N, or N1,N2,... for one window per N
         -n|--noreload)   NORELOAD=true; shift ;;
         -r|--reverse)    REVERSE=YES; shift ;;
         -v|--verbose)    VERBOSE=YES; shift ;;
@@ -106,6 +107,44 @@ open_file() {
     feh ${FEH_ARGS[@]} --start-at "${FILE_LOCAL}" "$DIR_LOCAL" &
 }
 
+# Build a file list with at most $2 randomly chosen images from each
+# filename-prefix group in directory $1, written to $3 (absolute paths).
+# The group key is the pipeline's episode prefix (everything before
+# "__t<seconds>s__s<score>.<ext>") when present, otherwise the name with its
+# extension and any trailing digits/separators removed ("set_001.jpg" -> "set").
+build_grouped_list() {
+    find "$1" -mindepth 1 -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.webp' \) -printf '%f\n' \
+    | awk -v n="$2" -v dir="$1" -v seed="$RANDOM$$" '
+        BEGIN { srand(seed) }
+        {
+            f = $0; k = f
+            if (!sub(/__t[0-9.]+s__s[0-9.]+\.[A-Za-z]+$/, "", k)) {
+                sub(/\.[A-Za-z0-9]+$/, "", k); sub(/[0-9._ -]+$/, "", k)
+            }
+            cnt[k]++; files[k, cnt[k]] = f
+        }
+        END {
+            for (k in cnt) {
+                m = cnt[k]
+                for (i = m; i > 1; i--) { j = int(rand() * i) + 1; t = files[k, i]; files[k, i] = files[k, j]; files[k, j] = t }
+                lim = (m < n) ? m : n
+                for (i = 1; i <= lim; i++) print dir "/" files[k, i]
+                groups++
+            }
+            print groups > ("'"$3"'.groups")
+        }' > "$3"
+}
+
+open_grouped() {
+    DIR_LOCAL="$1"
+    for N in ${GROUPMAX//,/ }; do
+        listfile="/tmp/feh_grouped_$$_${N}.txt"
+        build_grouped_list "$DIR_LOCAL" "$N" "$listfile"
+        echo "group-max $N: $(wc -l < "$listfile") images from $(cat "$listfile.groups") groups"; rm -f "$listfile.groups"
+        feh ${FEH_ARGS[@]} --title "feh [%u of %l] - %f  (max $N per group)" --filelist "$listfile" &
+    done
+}
+
 open_directory() {
 
 
@@ -193,6 +232,8 @@ if [[ -n ${DIR} ]]; then
         DIR="$(echo $DIR | sed 's/\/[^\/]\{1,\}$//')"
         open_file "${DIR}" "${FILE}"
 
+    elif [ -d "${DIR}" ] && [ -n "$GROUPMAX" ]; then # a directory, sampled per prefix group
+        open_grouped "${DIR}"
     elif [ -d "${DIR}" ]; then # a directory is given
         open_directory "${DIR}"
     else # file doesn't exist
