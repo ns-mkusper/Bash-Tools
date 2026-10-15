@@ -181,6 +181,32 @@ fi
 
     num_of_files=$(cat /tmp/$tmp_find_file | wc -l)
 
+    # Prefix-group key per line (same rule as build_grouped_list): the
+    # pipeline's episode prefix when present, otherwise the name without its
+    # extension and trailing digits/separators. Used to snap each window's
+    # start to the first image of its group.
+    awk -F/ '{ k=$NF; if (!sub(/__t[0-9.]+s__s[0-9.]+\.[A-Za-z]+$/, "", k)) { sub(/\.[A-Za-z0-9]+$/, "", k); sub(/[0-9._ -]+$/, "", k) }; print k }' /tmp/$tmp_find_file > /tmp/$tmp_find_file.keys
+    num_of_groups=$(sort -u /tmp/$tmp_find_file.keys | wc -l)
+    if [ "$INSTANCES" == "all" ] || [ "$INSTANCES" == "groups" ]; then
+        # one window per prefix group, starting at its first image; at most
+        # 32 windows, spread evenly over the groups when there are more
+        awk '!seen[$0]++ {print NR}' /tmp/$tmp_find_file.keys > /tmp/$tmp_find_file.starts
+        if [ $num_of_groups -gt 32 ]; then
+            echo "feh-open: $num_of_groups prefix groups; opening 32 windows spread over them (use -i N for a different count)" >&2
+            awk -v n=32 '{a[NR]=$0} END{for(i=0;i<n;i++) print a[int((i+0.5)*NR/n)+1]}' /tmp/$tmp_find_file.starts > /tmp/$tmp_find_file.starts2
+            mv /tmp/$tmp_find_file.starts2 /tmp/$tmp_find_file.starts
+        fi
+        while read -r ln; do
+            f="$(sed -n ${ln}p /tmp/$tmp_find_file)"
+            echo "feh ${FEH_ARGS[@]} --start-at ${f} $DIR_LOCAL &"
+            feh ${FEH_ARGS[@]} --start-at "${f}" "$DIR_LOCAL" &
+        done < /tmp/$tmp_find_file.starts
+        rm -f /tmp/$tmp_find_file.starts
+        return
+    fi
+    [ $INSTANCES -gt $num_of_files ] && INSTANCES=$num_of_files
+    [ $INSTANCES -lt 1 ] && INSTANCES=1
+
     skip_val=$((num_of_files / $INSTANCES))
 
     i=0
@@ -206,13 +232,10 @@ fi
         fi
 
 
-        file_at_pos="$(sed -n ${POSITION}p /tmp/$tmp_find_file)"
-        #        file_base="$(echo "$file_at_pos" | sed 's/.*\/\([^\/]\{1,\}[^0-9]\)[0-9\.]\{1,\}\.jpg/\1/')"
-        file_base="$(echo "$file_at_pos" | sed 's/.*\///' | sed 's/[^0-9][0-9\.]\{1,\}\.jpg//')"
-        #echo "$file_base"
-        file_start_num="$(grep -n "$file_base" /tmp/$tmp_find_file | sed 's/^[^:]\{1,\}:\([0-9]\{1,\}\):.*/\1/' | sed 's/^\([0-9]\{1,\}\):.*/\1/' | head -n 1)"
-        #echo $file_start_num
-        #if [ $((file_start_num)) -lt $((skip_val * i)) ];then
+        # first line of the prefix group that POSITION falls in
+        key="$(sed -n "${POSITION}p" /tmp/$tmp_find_file.keys)"
+        file_start_num=$(awk -v key="$key" '$0==key{print NR; exit}' /tmp/$tmp_find_file.keys)
+        [ -z "$file_start_num" ] && file_start_num=$POSITION
 	file_to_touch="$(sed -n ${file_start_num}p /tmp/$tmp_find_file)"
         #else
 	#   file_to_touch="$(sed -n ${POSITION}p /tmp/$tmp_find_file)"
